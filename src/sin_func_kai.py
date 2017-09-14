@@ -26,26 +26,31 @@ test_x = x_axis[test_idx]
 test_y = y_axis[test_idx]
 
 class mymodel(rm.Model):
-    def __init__(self):
-        self.layer_list = [
-            rm.Dense(1),
-            #rm.BatchNormalize(),
-            rm.Dense(10),
-            rm.Sigmoid(),
-            rm.Dense(1)
-        ]
-        #self.input = rm.Dense(1)
-        #self.hidden = rm.Dense(10)
-        #self.output = rm.Dense(1)
+    def __init__(self, input_shape, output_shape, growth_rate=12, depth=3):
+        self.depth = depth
+        if depth != 1:
+            under_growth_rate = input_shape + growth_rate
+            self.under_model = mymodel(
+                under_growth_rate,
+                output_shape,
+                growth_rate = growth_rate,
+                depth = depth - 1)
+        else:
+            self.output = rm.Dense(output_shape)
+        self.batch = rm.BatchNormalize()
+        self.conv = rm.Dense(growth_rate)
 
     def forward(self, x):
-        hidden = self.layer_list[0](x)
-        for item in self.layer_list[1:]:
-            hidden = item(hidden)
-        return hidden
+        hidden = self.batch(x)
+        hidden = rm.sigmoid(hidden)
+        hidden = self.conv(hidden)
+        hidden = rm.concat(x,hidden)
+        if self.depth != 1:
+            return self.under_model(hidden)
+        return self.output(hidden)
 
-func_model = mymodel()
-optimizer = rm.Adam()
+func_model = mymodel(1, 1)
+optimizer = rm.Sgd(lr=0.15, momentum=0.6)
 plt.clf()
 epoch_splits = 10
 epoch_period = epoch // epoch_splits
@@ -62,7 +67,6 @@ for e in range(epoch):
     loss = rm.mean_squared_error(func_model(test_x), test_y)
     curve[1].append(loss.as_ndarray())
     if e % epoch_period == epoch_period - 1 or e == epoch:
-        set_trace()
         ax_ = ax[e//epoch_period]
         curve_na = np.array(curve)
         ax_[0].plot(curve_na[0])

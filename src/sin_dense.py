@@ -11,7 +11,7 @@ random.seed(10)
 N = 30
 noise_rate = 0.3
 epoch = 100
-batch_size = 5#'Full'
+batch_size = 10#'Full'
 
 noise = random.randn(N)*noise_rate
 x_axis = np.linspace(-np.pi,np.pi,N)
@@ -95,10 +95,10 @@ class mymodel(rm.Model):
         return self.output(hidden)
 
 # growth_rate = 2
-# depth = 10
-# mymodel perform 1 epoch @ 1.9 sec
-# mymodel_recursive perform 1 epoch @ 1.3 sec
-func_model = mymodel(1, 1, growth_rate=2, depth=10, dropout=False)
+# depth = 8 
+# mymodel perform 1 epoch @ 0.30 sec
+# mymodel_recursive perform 1 epoch @ 0.22 sec
+func_model = mymodel(1, 1, growth_rate=2, depth=8, dropout=False)
 optimizer = rm.Sgd(lr=0.2, momentum=0.6)
 plt.clf()
 epoch_splits = 10
@@ -119,7 +119,7 @@ for e in range(epoch):
         batch_x = train_x[idx]
         batch_y = train_y[idx]
         with func_model.train():
-            loss = rm.mean_squared_error(func_model(train_x), train_y)
+            loss = rm.mean_squared_error(func_model(batch_x), batch_y)
         grad = loss.grad()
         grad.update(optimizer)
         batch_loss.append(loss.as_ndarray()) 
@@ -143,6 +143,7 @@ for e in range(epoch):
         ax_[1].scatter(x_axis, y_axis, marker='+')
         ax_[1].scatter(train_x, pred_train, c='g', alpha=0.3)
         ax_[1].scatter(test_x, pred_test, c='r', alpha=0.6)
+        ax_[1].text(0,-1,'RMSEtest {:.2f}'.format(np.power(test_y-pred_test,2).mean()**0.5))
         plt.pause(0.5)
 fig.savefig('result/dense.png')
 plt.pause(3)

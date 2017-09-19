@@ -11,7 +11,7 @@ random.seed(10)
 N = 30
 noise_rate = 0.3
 epoch = 100
-batch_size = 5#'Full'
+batch_size = 10#'Full'
 
 noise = random.randn(N)*noise_rate
 x_axis = np.linspace(-np.pi,np.pi,N)
@@ -30,7 +30,7 @@ test_y = y_axis[test_idx]
 class mymodel(rm.Model):
     def __init__(self):
         self.input = rm.Dense(1)
-        self.hidden = rm.Dense(2)
+        self.hidden = rm.Dense(4)
         self.output = rm.Dense(1)
 
     def forward(self, x):
@@ -57,7 +57,7 @@ for e in range(epoch):
         batch_x = train_x[idx]
         batch_y = train_y[idx]
         with func_model.train():
-            loss = rm.mean_squared_error(func_model(train_x), train_y)
+            loss = rm.mean_squared_error(func_model(batch_x), batch_y)
         grad = loss.grad()
         grad.update(optimizer)
         batch_loss.append(loss.as_ndarray()) 
@@ -81,6 +81,7 @@ for e in range(epoch):
         ax_[1].scatter(x_axis, y_axis, marker='+')
         ax_[1].scatter(train_x, pred_train, c='g', alpha=0.3)
         ax_[1].scatter(test_x, pred_test, c='r', alpha=0.6)
+        ax_[1].text(0,-1,'RMSEtest {:.2f}'.format(np.power(test_y-pred_test,2).mean()**0.5))
         plt.pause(0.5)
 fig.savefig('result/func.png')
 plt.pause(3)

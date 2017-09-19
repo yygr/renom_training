@@ -4,12 +4,14 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 from pdb import set_trace
 from numpy import random
+from time import time
 
 random.seed(10)
 
 N = 30
 noise_rate = 0.3
 epoch = 100
+batch_size = 5#'Full'
 
 noise = random.randn(N)*noise_rate
 x_axis = np.linspace(-np.pi,np.pi,N)
@@ -28,40 +30,57 @@ test_y = y_axis[test_idx]
 class mymodel(rm.Model):
     def __init__(self):
         self.input = rm.Dense(1)
-        self.hidden = rm.Dense(10)
+        self.hidden = rm.Dense(2)
         self.output = rm.Dense(1)
 
     def forward(self, x):
-        return self.output(rm.sigmoid(self.hidden(self.input(x))))
+        return self.output(rm.tanh(self.hidden(self.input(x))))
 
 func_model = mymodel()
-optimizer = rm.Sgd(0.1, momentum=0.9)
+optimizer = rm.Sgd(0.2, momentum=0.6)
 plt.clf()
 epoch_splits = 10
 epoch_period = epoch // epoch_splits
 fig, ax = plt.subplots(epoch_splits, 2, 
-figsize=(4, epoch_splits))
+figsize=(8, epoch_splits*4))
+if batch_size == 'Full':
+    batch_size = len(train_x)
 
 curve = [[], []]
+neighbor_period = []
 for e in range(epoch):
-    with func_model.train():
-        loss = rm.mean_squared_error(func_model(train_x), train_y)
-    grad = loss.grad()
-    grad.update(optimizer)
+    s = time()
+    perm = np.random.permutation(len(train_x))
+    batch_loss = []
+    for i in range(0, len(train_x), batch_size):
+        idx = perm[i:i+batch_size]
+        batch_x = train_x[idx]
+        batch_y = train_y[idx]
+        with func_model.train():
+            loss = rm.mean_squared_error(func_model(train_x), train_y)
+        grad = loss.grad()
+        grad.update(optimizer)
+        batch_loss.append(loss.as_ndarray()) 
+    neighbor_period.append(time()-s)
     curve[0].append(loss.as_ndarray())
     loss = rm.mean_squared_error(func_model(test_x), test_y)
     curve[1].append(loss.as_ndarray())
     if e % epoch_period == epoch_period - 1 or e == epoch:
+        current_period =  np.array(neighbor_period).mean()
+        neighbor_period = []
         ax_ = ax[e//epoch_period]
         curve_na = np.array(curve)
+        ax_[0].text(0,0.5, '{:.2f}sec @ epoch'.format(current_period))
         ax_[0].plot(curve_na[0])
         ax_[0].plot(curve_na[1])
+        ax_[0].set_ylim(0,1)
+        ax_[0].set_xlim(-2, epoch+10)
         pred_train = func_model(train_x)
         pred_test = func_model(test_x)
         ax_[1].plot(x_axis, base, 'k-')
         ax_[1].scatter(x_axis, y_axis, marker='+')
         ax_[1].scatter(train_x, pred_train, c='g', alpha=0.3)
-        ax_[1].scatter(test_x, pred_test, c='r', alpha=0.8)
+        ax_[1].scatter(test_x, pred_test, c='r', alpha=0.6)
         plt.pause(0.5)
 fig.savefig('result/func.png')
 plt.pause(3)

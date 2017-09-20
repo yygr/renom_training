@@ -93,12 +93,68 @@ class mymodel(rm.Model):
             hidden = rm.concat(main_stream, hidden)
         #print(hidden.shape)
         return self.output(hidden)
+class EncoderDecoder(rm.Model):
+    def __init__(self,
+        input_shape,
+        output_shape,
+        units = 10,
+        depth = 3):
+        self.input_shape = input_shape
+        self.output_shape = output_shape
+        self.units = units
+        self.depth = depth
+        parameters = []
+        for _ in range(depth):
+            parameters.append(rm.Dense(units))
+        self.hidden = rm.Sequential(parameters)
+        self.input = rm.Dense(input_shape)
+        self.multi_output = False
+        if isinstance(self.output_shape, tuple):
+            self.multi_output = True
+            parameters = []
+            for _ in range(output_shape[0]):
+                parameters.append(rm.Dense(output_shape[1]))
+            self.output = rm.Sequential(parameters)
+        else:
+            self.output = rm.Dense(output_shape)
+    
+    def forward(self, x):
+        layers = self.hidden._layers
+        hidden = self.input(x)
+        for i in range(self.depth):
+            hidden = rm.sigmoid(hidden)
+            hidden = layers[i](hidden)
+        if self.multi_output:
+            layers = self.output._layers
+            outputs = []
+            for i in range(self.output_shape[0]):
+                outputs.append(rm.relu(layers[i](hidden)))
+            return np.array(outputs)
+        return self.output(hidden)
 
-# growth_rate = 2
-# depth = 8 
-# mymodel perform 1 epoch @ 0.30 sec
-# mymodel_recursive perform 1 epoch @ 0.22 sec
-func_model = mymodel(1, 1, growth_rate=2, depth=8, dropout=False)
+class Vae(rm.Model):
+    def __init__(self, enc, dec):
+        self.enc = enc
+        self.dec = dec
+
+    def forward(self, x):
+        z = enc(x)
+        z_mean = z[0]
+        z_log_var = z[1]
+        e = np.random.randn(len(x), latent_dimension) * sigma
+        z_new = z_mean + np.exp(z_log_var/2)*e
+        decoded = dec(z_new)
+        kl_loss = - 0.5 * (1 + z_log_var 
+            + np.power(z_mean, 0.5) - np.exp(z_log_var)).sum(1)
+        xent_loss = (x * np.log(decoded) + (1-x)*np.log(1-decoded)) 
+        return (kl_loss + xent_loss).mean()
+
+latent_dimension = 3
+sigma = 0.3
+enc = EncoderDecoder(1, (2, latent_dimension))
+dec = EncoderDecoder(latent_dimension, 1)
+vae = Vae(enc, dec)
+
 optimizer = rm.Sgd(lr=0.2, momentum=0.6)
 plt.clf()
 epoch_splits = 10
@@ -118,8 +174,9 @@ for e in range(epoch):
         idx = perm[i:i+batch_size]
         batch_x = train_x[idx]
         batch_y = train_y[idx]
-        with func_model.train():
-            loss = rm.mean_squared_error(func_model(batch_x), batch_y)
+        with vae.train():
+            loss = vae(batch_x)
+        set_trace()
         grad = loss.grad()
         grad.update(optimizer)
         batch_loss.append(loss.as_ndarray()) 

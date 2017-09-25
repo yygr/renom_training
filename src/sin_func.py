@@ -10,12 +10,14 @@ random.seed(10)
 
 N = 30
 noise_rate = 0.3
-epoch = 100
-batch_size = 10#'Full'
+x_noise_rate = 0.1
+epoch = 1000
+batch_size = 8#'Full'
 
-noise = random.randn(N)*noise_rate
-x_axis = np.linspace(-np.pi,np.pi,N)
-base = np.sin(x_axis)
+noise = random.randn(N, 1)*noise_rate
+x_axis_org = np.linspace(-np.pi,np.pi,N).reshape(N, 1) 
+base = np.sin(x_axis_org).reshape(N, 1)
+x_axis = x_axis_org + random.randn(N,1)*x_noise_rate
 y_axis = base+noise
 x_axis = x_axis.reshape(N, 1)
 y_axis = y_axis.reshape(N, 1)
@@ -30,14 +32,14 @@ test_y = y_axis[test_idx]
 class mymodel(rm.Model):
     def __init__(self):
         self.input = rm.Dense(1)
-        self.hidden = rm.Dense(4)
+        self.hidden = rm.Dense(10)
         self.output = rm.Dense(1)
 
     def forward(self, x):
         return self.output(rm.tanh(self.hidden(self.input(x))))
 
 func_model = mymodel()
-optimizer = rm.Sgd(0.2, momentum=0.6)
+optimizer = rm.Adam()#Sgd(0.2, momentum=0.6)
 plt.clf()
 epoch_splits = 10
 epoch_period = epoch // epoch_splits
@@ -77,11 +79,12 @@ for e in range(epoch):
         ax_[0].set_xlim(-2, epoch+10)
         pred_train = func_model(train_x)
         pred_test = func_model(test_x)
-        ax_[1].plot(x_axis, base, 'k-')
+        ax_[1].plot(x_axis_org, base, 'k-')
         ax_[1].scatter(x_axis, y_axis, marker='+')
         ax_[1].scatter(train_x, pred_train, c='g', alpha=0.3)
         ax_[1].scatter(test_x, pred_test, c='r', alpha=0.6)
-        ax_[1].text(0,-1,'RMSEtest {:.2f}'.format(np.power(test_y-pred_test,2).mean()**0.5))
+        rmse = np.power(base-func_model(x_axis_org),2).mean()**0.5
+        ax_[1].text(0,-1,'RMSEtrue {:.2f}'.format(rmse))
         plt.pause(0.5)
-fig.savefig('result/func.png')
+fig.savefig('result/func{}.png'.format(epoch))
 plt.pause(3)

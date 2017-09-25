@@ -5,17 +5,21 @@ import matplotlib as mpl
 from pdb import set_trace
 from numpy import random
 from time import time
+np.set_printoptions(precision=3)
 
 random.seed(10)
 
 N = 30
 noise_rate = 0.3
+x_noise_rate = 0.1
 epoch = 1000
-batch_size = 10#'Full'
+batch_size = 8#'Full'
+vae_learn = True
 
 noise = random.randn(N)*noise_rate
-x_axis = np.linspace(-np.pi,np.pi,N)
-base = np.sin(x_axis)
+x_axis_org = np.linspace(-np.pi,np.pi,N) 
+base = np.sin(x_axis_org)
+x_axis = x_axis_org + random.randn(N)*x_noise_rate
 y_axis = base+noise
 x_axis = x_axis.reshape(N, 1)
 y_axis = y_axis.reshape(N, 1)
@@ -27,72 +31,6 @@ train_y = y_axis[train_idx]
 test_x = x_axis[test_idx]
 test_y = y_axis[test_idx]
 
-class mymodel_recursive(rm.Model):
-    def __init__(
-        self, input_shape, 
-        output_shape, 
-        growth_rate=12, 
-        depth=3,
-        dropout=False):
-        self.depth = depth
-        self.dropout = dropout
-        if depth != 1:
-            under_growth_rate = input_shape + growth_rate
-            self.under_model = mymodel(
-                under_growth_rate,
-                output_shape,
-                growth_rate = growth_rate,
-                depth = depth - 1)
-        else:
-            self.output = rm.Dense(output_shape)
-        self.batch = rm.BatchNormalize()
-        self.conv = rm.Dense(growth_rate)
-
-    def forward(self, x):
-        hidden = self.batch(x)
-        hidden = rm.tanh(hidden)
-        hidden = self.conv(hidden)
-        if self.dropout:
-            hidden = rm.dropout(hidden)
-        hidden = rm.concat(x, hidden)
-        if self.depth != 1:
-            return self.under_model(hidden)
-        #print(hidden.shape)
-        return self.output(hidden)
-
-class mymodel(rm.Model):
-    def __init__(self, input_shape, output_shape,
-        growth_rate = 12,
-        depth = 3,
-        dropout = False,
-        ):
-        self.growth_rate = growth_rate
-        self.depth = depth
-        self.dropout = dropout
-        self.input = rm.Dense(input_shape)
-        self.output = rm.Dense(output_shape)
-        parameters = []
-        for _ in range(depth):
-            parameters.append(rm.BatchNormalize())
-            parameters.append(rm.Dense(growth_rate))
-        self.hidden = rm.Sequential(parameters)
-    
-    def forward(self, x):
-        layers = self.hidden._layers
-        hidden = self.input(x)
-        i = 0
-        for _ in range(self.depth):
-            main_stream = hidden
-            hidden = layers[i](main_stream)
-            i += 1
-            hidden = rm.tanh(hidden)
-            hidden = layers[i](hidden)
-            i += 1
-            if self.dropout:
-                hidden = rm.dropout(hidden)
-            hidden = rm.concat(main_stream, hidden)
-        #print(hidden.shape)
-        return self.output(hidden)
 class EncoderDecoder(rm.Model):
     def __init__(self,
         input_shape,
@@ -122,49 +60,60 @@ class EncoderDecoder(rm.Model):
         layers = self.hidden._layers
         hidden = self.input(x)
         for i in range(self.depth):
-            hidden = rm.sigmoid(hidden)
             hidden = layers[i](hidden)
+            hidden = rm.relu(hidden)
         if self.multi_output:
             layers = self.output._layers
             outputs = []
             for i in range(self.output_shape[0]):
-                outputs.append(rm.relu(layers[i](hidden)))
-            return np.array(outputs)
+                outputs.append(layers[i](hidden))
+            return outputs
+        hidden = rm.relu(hidden)
         return self.output(hidden)
 
 class Vae(rm.Model):
-    def __init__(self, enc, dec):
+    def __init__(self, enc, dec, output_shape = 1):
         self.enc = enc
         self.dec = dec
 
     def forward(self, x):
-        z = enc(x)
-        z_mean = z[0]
-        z_log_var = z[1]
+        self.z = enc(x)
+        z_mean, z_log_var = self.z[0], rm.relu(self.z[1])
         e = np.random.randn(len(x), latent_dimension) * sigma
-        z_new = z_mean + np.exp(z_log_var/2)*e
-        decoded = dec(z_new)
-        kl_loss = - 0.5 * (1 + z_log_var 
-            + np.power(z_mean, 0.5) - np.exp(z_log_var)).sum(1)
-        xent_loss = (x * np.log(decoded) + (1-x)*np.log(1-decoded)) 
-        return (kl_loss + xent_loss).mean()
+        z_new = z_mean + rm.exp(z_log_var/2)*e
+        self.d = dec(z_new)
+        d_mean, d_log_var = self.d[0], rm.relu(self.d[1])
+        nb, zd = z_log_var.shape
+        kl_loss = rm.Variable(0)
+        pxz_loss = rm.Variable(0)
+        for i in range(nb):
+            kl_loss += -0.5*rm.sum(1 + z_log_var[i] - z_mean[i]**2 - rm.exp(z_log_var[i]))
+            pxz_loss += rm.sum(0.5*d_log_var[i] + (x[i]-d_mean[i])**2/(2*rm.exp(d_log_var[i])))
+        #pxz_loss = rm.sum(0.5*d_log_var + (x-d_mean)**2/(2*rm.exp(d_log_var)))
+        vae_loss = (kl_loss + pxz_loss)/nb
+        print(dec.output._layers[0].params['w'])
+        print(dec.output._layers[0].params['b'])
+        print(enc.output._layers[0].params['w'])
+        print(enc.output._layers[0].params['b'])
+        #pprint(dec.hidden._layers[-1].params['b'])
+        return vae_loss 
 
-latent_dimension = 3
-sigma = 0.3
-enc = EncoderDecoder(1, (2, latent_dimension))
-dec = EncoderDecoder(latent_dimension, 1)
+latent_dimension = 1 
+sigma = 1.
+enc = EncoderDecoder(2, (2, latent_dimension), units=4, depth=2)
+dec = EncoderDecoder(latent_dimension, (2, 2), units=4, depth=2)
 vae = Vae(enc, dec)
 
-optimizer = rm.Sgd(lr=0.2, momentum=0.6)
+optimizer = rm.Adam()#Sgd(lr=0.3, momentum=0.4)
 plt.clf()
 epoch_splits = 10
 epoch_period = epoch // epoch_splits
 fig, ax = plt.subplots(epoch_splits, 2, 
-figsize=(8, epoch_splits*4))
+figsize=(16, epoch_splits*8))
 if batch_size == 'Full':
     batch_size = len(train_x)
 
-curve = [[], []]
+curve = []
 neighbor_period = []
 for e in range(epoch):
     s = time()
@@ -175,32 +124,35 @@ for e in range(epoch):
         batch_x = train_x[idx]
         batch_y = train_y[idx]
         with vae.train():
-            loss = vae(batch_x)
-        set_trace()
-        grad = loss.grad()
+            vae_loss = vae(np.c_[batch_x, batch_y])
+        grad = vae_loss.grad()
         grad.update(optimizer)
-        batch_loss.append(loss.as_ndarray()) 
+        batch_loss.append(vae_loss.as_ndarray())
     neighbor_period.append(time()-s)
-    curve[0].append(np.array(batch_loss).mean())
-    loss = rm.mean_squared_error(func_model(test_x), test_y)
-    curve[1].append(loss.as_ndarray())
+    test_loss = vae(np.c_[test_x, test_y])
+    curve.append([np.array(batch_loss).mean(),test_loss.as_ndarray()])
     if e % epoch_period == epoch_period - 1 or e == epoch:
+        if e > epoch//5:
+            vae_learn = False
         current_period =  np.array(neighbor_period).mean()
         neighbor_period = []
         ax_ = ax[e//epoch_period]
         curve_na = np.array(curve)
         ax_[0].text(0,0.5, '{:.2f}sec @ epoch'.format(current_period))
-        ax_[0].plot(curve_na[0])
-        ax_[0].plot(curve_na[1])
-        ax_[0].set_ylim(0,1)
+        ax_[0].plot(curve_na[:,0])
+        ax_[0].plot(curve_na[:,1])
+        ax_[0].set_ylim(0,3)
         ax_[0].set_xlim(-2, epoch+10)
-        pred_train = func_model(train_x)
-        pred_test = func_model(test_x)
-        ax_[1].plot(x_axis, base, 'k-')
+        ax_[0].grid()
+        vae(np.c_[train_x, train_y])
+        pred_train = vae.d[0]
+        vae(np.c_[test_x, test_y])
+        pred_test = vae.d[0]
+        ax_[1].plot(x_axis_org, base, 'k-')
         ax_[1].scatter(x_axis, y_axis, marker='+')
-        ax_[1].scatter(train_x, pred_train, c='g', alpha=0.3)
-        ax_[1].scatter(test_x, pred_test, c='r', alpha=0.6)
-        ax_[1].text(0,-1,'RMSEtest {:.2f}'.format(np.power(test_y-pred_test,2).mean()**0.5))
+        ax_[1].scatter(pred_train[:,0], pred_train[:,1], c='g', alpha=0.3)
+        ax_[1].scatter(pred_test[:,0], pred_test[:,1], c='r', alpha=0.6)
+        ax_[1].grid()
         plt.pause(0.5)
-fig.savefig('result/dense.png')
+fig.savefig('result/vae{}.png'.format(epoch))
 plt.pause(3)

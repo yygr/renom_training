@@ -5,18 +5,22 @@ from pdb import set_trace
 from numpy import random
 from time import time
 from keras.layers import Input, Dense, Lambda, Layer
+from keras.layers.merge import Concatenate
 from keras.models import Model
 from keras import backend as K
 np.set_printoptions(precision=3)
 
 random.seed(10)
 
-N = 30
+N = 100
 noise_rate = 0.3
 x_noise_rate = 0.1
-epoch = 1000
-batch_size = 5#'Full'
+epoch = 2000
+batch_size = 10#'Full'
 vae_learn = True
+original_dimension = 2
+latent_dimension = 1
+intermidiate_dimension = 10
 
 noise = random.randn(N).astype('float32')*noise_rate
 x_axis_org = np.linspace(-np.pi,np.pi,N).astype('float32')
@@ -40,27 +44,27 @@ def gen_network(hidden, units=4, depth=2):
         hidden = Dense(units, activation='relu')(hidden)
     return hidden
 
-original_dimension = 2
-latent_dimension = 1 
 
 def sampling(args):
     z_mean, z_log_var = args
-    e = K.random_normal(shape=(K.shape(z_mean)[0], 1, latent_dimension), 
+    e = K.random_normal(shape=(K.shape(z_mean)[0], latent_dimension), 
         mean=0., stddev=1.)
     return z_mean + K.exp(z_log_var/2) * e
 
 _x = Input(shape=(original_dimension,))
-#x = gen_network(_x)
-x = Dense(128)(_x)
-z_mean = Dense(latent_dimension, activation='sigmoid')(x)
-z_log_var = Dense(latent_dimension, activation='relu')(x)
+hidden = gen_network(_x, units=100, depth=2)
+#hidden = Dense(intermidiate_dimension, activation='sigmoid')(_x)
+#hidden = Dense(intermidiate_dimension, activation='sigmoid')(hidden)
+z_mean = Dense(latent_dimension)(hidden)
+z_log_var = Dense(latent_dimension)(hidden)
 z = Lambda(sampling, output_shape=(latent_dimension,))([
     z_mean, z_log_var#, latent_dimension
 ])
-#x = gen_network(z)
-x = Dense(128)(_x)
-dec_mean = Dense(original_dimension, activation='sigmoid')(x)
-dec_log_var = Dense(original_dimension, activation='relu')(x)
+x = gen_network(z, units=100, depth=2)
+#x = Dense(intermidiate_dimension, activation='sigmoid')(z)
+#x = Dense(intermidiate_dimension, activation='sigmoid')(x)
+dec_mean = Dense(original_dimension)(x)
+dec_log_var = Dense(original_dimension)(x)
 
 class VaeLoss(Layer):
     def __init__(self, **kwargs):
@@ -75,68 +79,58 @@ class VaeLoss(Layer):
         self.add_loss(vae_loss, inputs=inputs)
         return vae_loss
 
+con = Concatenate(axis=-1)
+
 y = VaeLoss()([_x, z_mean, z_log_var, dec_mean, dec_log_var])
 vae = Model(_x, y)
-vae.compile(optimizer='sgd', loss=None)
+vae.compile(optimizer='adam', loss=None)
+enc = Model(_x, z_mean)
+vae_ = Model(_x, con([dec_mean,dec_log_var]))
+#vae.summary()
 
-vae.fit(x_train, shuffle=True, epochs=10000, 
-batch_size=batch_size, validation_data=(x_test, None))
-
-set_trace()
-
-enc = EncoderDecoder(2, (2, latent_dimension), units=4, depth=2)
-dec = EncoderDecoder(latent_dimension, (2, 2), units=4, depth=2)
-vae = Vae(enc, dec)
-
-optimizer = rm.Adam()#Sgd(lr=0.3, momentum=0.4)
 plt.clf()
-epoch_splits = 10
+epoch_splits = 5
 epoch_period = epoch // epoch_splits
 fig, ax = plt.subplots(epoch_splits, 2, 
 figsize=(16, epoch_splits*8))
 if batch_size == 'Full':
     batch_size = len(train_x)
 
-curve = []
+loss_curve = []
+val_loss_curve = []
 neighbor_period = []
-for e in range(epoch):
+for e in range(epoch_splits):
     s = time()
-    perm = np.random.permutation(len(train_x))
-    batch_loss = []
-    for i in range(0, len(train_x), batch_size):
-        idx = perm[i:i+batch_size]
-        batch_x = train_x[idx]
-        batch_y = train_y[idx]
-        with vae.train():
-            vae_loss = vae(np.c_[batch_x, batch_y])
-        grad = vae_loss.grad()
-        grad.update(optimizer)
-        batch_loss.append(vae_loss.as_ndarray())
-    neighbor_period.append(time()-s)
-    test_loss = vae(np.c_[test_x, test_y])
-    curve.append([np.array(batch_loss).mean(),test_loss.as_ndarray()])
-    if e % epoch_period == epoch_period - 1 or e == epoch:
-        if e > epoch//5:
-            vae_learn = False
-        current_period =  np.array(neighbor_period).mean()
-        neighbor_period = []
-        ax_ = ax[e//epoch_period]
-        curve_na = np.array(curve)
-        ax_[0].text(0,0.5, '{:.2f}sec @ epoch'.format(current_period))
-        ax_[0].plot(curve_na[:,0])
-        ax_[0].plot(curve_na[:,1])
-        ax_[0].set_ylim(0,3)
-        ax_[0].set_xlim(-2, epoch+10)
-        ax_[0].grid()
-        vae(np.c_[train_x, train_y])
-        pred_train = vae.d[0]
-        vae(np.c_[test_x, test_y])
-        pred_test = vae.d[0]
-        ax_[1].plot(x_axis_org, base, 'k-')
-        ax_[1].scatter(x_axis, y_axis, marker='+')
-        ax_[1].scatter(pred_train[:,0], pred_train[:,1], c='g', alpha=0.3)
-        ax_[1].scatter(pred_test[:,0], pred_test[:,1], c='r', alpha=0.6)
-        ax_[1].grid()
-        plt.pause(0.5)
-fig.savefig('result/vae{}.png'.format(epoch))
+    hist = vae.fit(x_train, shuffle=True, epochs=epoch_period, 
+        batch_size=batch_size, validation_data=(x_test, None))
+    loss_curve += hist.history['loss']
+    val_loss_curve += hist.history['val_loss']
+    ax_ = ax[e]
+    ax_[0].text(0,0.5, '{:.3f}sec @ epoch'.format((time()-s)/epoch_period))
+    ax_[0].plot(loss_curve)
+    ax_[0].plot(val_loss_curve)
+    ax_[0].set_ylim(-3,3)
+    ax_[0].set_xlim(-2, epoch+10)
+    ax_[0].grid()
+    pred_train = vae_.predict(x_train)
+    pred_test = vae_.predict(x_test)
+    ax_[1].plot(x_axis_org, base, 'k-')
+    xerr = np.exp(pred_train[:,2]/2)
+    yerr = np.exp(pred_train[:,3]/2)
+    ax_[1].errorbar(pred_train[:,0], pred_train[:,1], 
+        xerr=xerr, yerr=yerr, 
+        ecolor='skyblue', c='g', alpha=0.6, fmt='.')
+    xerr = np.exp(pred_test[:,2]/2)
+    yerr = np.exp(pred_test[:,3]/2)
+    ax_[1].errorbar(pred_test[:,0], pred_test[:,1], 
+        xerr=xerr, yerr=yerr, 
+        ecolor='skyblue', c='r', alpha=0.6, fmt='.')
+    ax_[1].scatter(x_axis, y_axis, marker='x', alpha=0.3, c='b')
+    ax_[1].grid()
+    plt.pause(0.5)
+fig.savefig('result/keras{}.png'.format(epoch))
 plt.pause(3)
+
+weights = vae.get_weights()
+for item in weights:
+    print('{}'.format(item))

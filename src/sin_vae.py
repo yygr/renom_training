@@ -5,15 +5,17 @@ import matplotlib as mpl
 from pdb import set_trace
 from numpy import random
 from time import time
+from vae_func import EncoderDecoder, Vae, DenseNet
+
 np.set_printoptions(precision=3)
 
 random.seed(10)
 
-N = 30
+N = 100
 noise_rate = 0.3
 x_noise_rate = 0.1
-epoch = 1000
-batch_size = 8#'Full'
+epoch = 100
+batch_size = 'Full'
 vae_learn = True
 
 noise = random.randn(N)*noise_rate
@@ -31,85 +33,25 @@ train_y = y_axis[train_idx]
 test_x = x_axis[test_idx]
 test_y = y_axis[test_idx]
 
-class EncoderDecoder(rm.Model):
-    def __init__(self,
-        input_shape,
-        output_shape,
-        units = 10,
-        depth = 3):
-        self.input_shape = input_shape
-        self.output_shape = output_shape
-        self.units = units
-        self.depth = depth
-        parameters = []
-        for _ in range(depth):
-            parameters.append(rm.Dense(units))
-        self.hidden = rm.Sequential(parameters)
-        self.input = rm.Dense(input_shape)
-        self.multi_output = False
-        if isinstance(self.output_shape, tuple):
-            self.multi_output = True
-            parameters = []
-            for _ in range(output_shape[0]):
-                parameters.append(rm.Dense(output_shape[1]))
-            self.output = rm.Sequential(parameters)
-        else:
-            self.output = rm.Dense(output_shape)
-    
-    def forward(self, x):
-        layers = self.hidden._layers
-        hidden = self.input(x)
-        for i in range(self.depth):
-            hidden = layers[i](hidden)
-            hidden = rm.relu(hidden)
-        if self.multi_output:
-            layers = self.output._layers
-            outputs = []
-            for i in range(self.output_shape[0]):
-                outputs.append(layers[i](hidden))
-            return outputs
-        hidden = rm.relu(hidden)
-        return self.output(hidden)
-
-class Vae(rm.Model):
-    def __init__(self, enc, dec, output_shape = 1):
-        self.enc = enc
-        self.dec = dec
-
-    def forward(self, x):
-        self.z = enc(x)
-        z_mean, z_log_var = self.z[0], rm.relu(self.z[1])
-        e = np.random.randn(len(x), latent_dimension) * sigma
-        z_new = z_mean + rm.exp(z_log_var/2)*e
-        self.d = dec(z_new)
-        d_mean, d_log_var = self.d[0], rm.relu(self.d[1])
-        nb, zd = z_log_var.shape
-        kl_loss = rm.Variable(0)
-        pxz_loss = rm.Variable(0)
-        for i in range(nb):
-            kl_loss += -0.5*rm.sum(1 + z_log_var[i] - z_mean[i]**2 - rm.exp(z_log_var[i]))
-            pxz_loss += rm.sum(0.5*d_log_var[i] + (x[i]-d_mean[i])**2/(2*rm.exp(d_log_var[i])))
-        #pxz_loss = rm.sum(0.5*d_log_var + (x-d_mean)**2/(2*rm.exp(d_log_var)))
-        vae_loss = (kl_loss + pxz_loss)/nb
-        print(dec.output._layers[0].params['w'])
-        print(dec.output._layers[0].params['b'])
-        print(enc.output._layers[0].params['w'])
-        print(enc.output._layers[0].params['b'])
-        #pprint(dec.hidden._layers[-1].params['b'])
-        return vae_loss 
-
 latent_dimension = 1 
-sigma = 1.
-enc = EncoderDecoder(2, (2, latent_dimension), units=4, depth=2)
-dec = EncoderDecoder(latent_dimension, (2, 2), units=4, depth=2)
+if 0:
+    enc = EncoderDecoder(2, (2, latent_dimension), 
+        units=100, depth=5, batch_normal=True, dropout=True)
+    dec = EncoderDecoder(latent_dimension, (2, 2), 
+        units=100, depth=5, batch_normal=True, dropout = True)
+else:
+    enc = DenseNet(2, (2, latent_dimension),
+        units=6, growth_rate=12, depth=6)
+    dec = DenseNet(latent_dimension, (2, 2),
+        units=6, growth_rate=12, depth=6)
 vae = Vae(enc, dec)
 
-optimizer = rm.Adam()#Sgd(lr=0.3, momentum=0.4)
+optimizer = rm.Adam()#Sgd(lr=0.01, momentum=0.)
 plt.clf()
-epoch_splits = 10
+epoch_splits = 5
 epoch_period = epoch // epoch_splits
-fig, ax = plt.subplots(epoch_splits, 2, 
-figsize=(16, epoch_splits*8))
+fig, ax = plt.subplots(epoch_splits, 3, 
+    figsize=(16, epoch_splits*8))
 if batch_size == 'Full':
     batch_size = len(train_x)
 
@@ -138,21 +80,46 @@ for e in range(epoch):
         neighbor_period = []
         ax_ = ax[e//epoch_period]
         curve_na = np.array(curve)
-        ax_[0].text(0,0.5, '{:.2f}sec @ epoch'.format(current_period))
+        lowest = curve_na.min()
+        ax_[0].text(1,lowest, '{:.2f}sec @ epoch'.format(current_period))
         ax_[0].plot(curve_na[:,0])
         ax_[0].plot(curve_na[:,1])
-        ax_[0].set_ylim(0,3)
         ax_[0].set_xlim(-2, epoch+10)
         ax_[0].grid()
-        vae(np.c_[train_x, train_y])
-        pred_train = vae.d[0]
-        vae(np.c_[test_x, test_y])
-        pred_test = vae.d[0]
-        ax_[1].plot(x_axis_org, base, 'k-')
-        ax_[1].scatter(x_axis, y_axis, marker='+')
-        ax_[1].scatter(pred_train[:,0], pred_train[:,1], c='g', alpha=0.3)
-        ax_[1].scatter(pred_test[:,0], pred_test[:,1], c='r', alpha=0.6)
+
+        check_data = np.c_[x_axis, y_axis]
+        if latent_dimension == 1:
+            vae(check_data[train_idx])
+            ax_[1].scatter(x_axis[train_idx], vae.z_mean, marker='.', alpha=0.7, c='k')
+            vae(check_data[test_idx])
+            ax_[1].scatter(x_axis[test_idx], vae.z_mean, marker='.', alpha=0.7, c='b')
+        else:
+            vae(check_data[train_idx])
+            ax_[1].scatter(vae.z_mean[:,0], vae.z_mean[:,1],
+                marker='.', alpha=0.7, c='k')
+            vae(check_data[test_idx])
+            ax_[1].scatter(vae.z_mean[:,0], vae.z_mean[:,1],
+                marker='.', alpha=0.7, c='b')
         ax_[1].grid()
+
+        vae(np.c_[train_x, train_y])
+        pred_train_m, pred_train_d = vae.d_mean, vae.d_log_var
+        vae(np.c_[test_x, test_y])
+        pred_test_m, pred_test_d = vae.d_mean, vae.d_log_var
+        ax_[2].plot(x_axis_org, base, 'k-')
+        xerr = np.exp(pred_train_d[:,0]/2)
+        yerr = np.exp(pred_train_d[:,1]/2)
+        ax_[2].errorbar(pred_train_m[:,0], pred_train_m[:,1], 
+            xerr=xerr, yerr=yerr, 
+            ecolor='skyblue', c='g', alpha=0.6, fmt='.')
+        xerr = np.exp(pred_test_d[:,0]/2)
+        yerr = np.exp(pred_test_d[:,1]/2)
+        ax_[2].errorbar(pred_test_m[:,0], pred_test_m[:,1],
+            xerr=xerr, yerr=yerr, 
+            ecolor='skyblue', c='r', alpha=0.6, fmt='.')
+        ax_[2].scatter(train_x, train_y, marker='x', alpha=0.7, c='k')
+        ax_[2].scatter(test_x, test_y, marker='x', alpha=0.7, c='gold')
+        ax_[2].grid()
         plt.pause(0.5)
-fig.savefig('result/vae{}.png'.format(epoch))
+fig.savefig('result/sin_vae{}.png'.format(epoch))
 plt.pause(3)

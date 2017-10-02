@@ -6,10 +6,13 @@ from pdb import set_trace
 from numpy import random
 from time import time
 from vae_func import EncoderDecoder, Vae, DenseNet
+from renom.cuda.cuda import set_cuda_active
 
 np.set_printoptions(precision=3)
 
 random.seed(10)
+
+#set_cuda_active(True)
 
 N = 100
 noise_rate = 0.3
@@ -36,19 +39,19 @@ test_y = y_axis[test_idx]
 latent_dimension = 1 
 if 0:
     enc = EncoderDecoder(2, (2, latent_dimension), 
-        units=100, depth=5, batch_normal=True, dropout=True)
+        units=100, depth=4, batch_normal=True, dropout=True)
     dec = EncoderDecoder(latent_dimension, (2, 2), 
-        units=100, depth=5, batch_normal=True, dropout = True)
+        units=100, depth=4, batch_normal=True, dropout = True)
 else:
     enc = DenseNet(2, (2, latent_dimension),
-        units=6, growth_rate=12, depth=6)
+        units=200, growth_rate=100, depth=4, dropout=True)
     dec = DenseNet(latent_dimension, (2, 2),
-        units=6, growth_rate=12, depth=6)
+        units=200, growth_rate=100, depth=4, dropout=True)
 vae = Vae(enc, dec)
 
-optimizer = rm.Adam()#Sgd(lr=0.01, momentum=0.)
+optimizer = rm.Adam()#Sgd(lr=0.1, momentum=.4)
 plt.clf()
-epoch_splits = 5
+epoch_splits = 10
 epoch_period = epoch // epoch_splits
 fig, ax = plt.subplots(epoch_splits, 3, 
     figsize=(16, epoch_splits*8))

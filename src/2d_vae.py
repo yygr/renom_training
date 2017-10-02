@@ -13,8 +13,8 @@ random.seed(10)
 N = 100
 noise_rate = 0.3
 x_noise_rate = 0.1
-epoch = 500
-batch_size = 'Full'
+epoch = 100
+batch_size = 10#'Full'
 vae_learn = True
 
 if 0:
@@ -65,14 +65,14 @@ if 0:
         units=6, depth=3)#, batch_normal=True)
 else:
     enc = DenseNet(2, (2, latent_dimension),
-        units=6, depth=4)
+        units=20, growth_rate=20, depth=4, dropout=True)
     dec = DenseNet(latent_dimension, (2, 2),
-        units=6, depth=4)
+        units=20, growth_rate=20, depth=4, dropout=True)
 vae = Vae(enc, dec)
 
 optimizer = rm.Adam()#Sgd(lr=0.01, momentum=0.)
 plt.clf()
-epoch_splits = 5
+epoch_splits = 10
 epoch_period = epoch // epoch_splits
 fig, ax = plt.subplots(epoch_splits, 3, 
     figsize=(16, epoch_splits*8))

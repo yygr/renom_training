@@ -12,18 +12,24 @@ class DenseNet(rm.Model):
         units = 10,
         depth = 3,
         growth_rate = 12,
-        dropout = False):
+        dropout = False,
+        initializer=rm.utility.initializer.Gaussian(std=0.3),
+        active=rm.tanh
+        ):
         self.input_shape = input_shape
         self.output_shape = output_shape
         self.units = units
         self.depth = depth
         self.dropout = dropout
+        self.active = active
         parameters = []
         add_units = units
         for _ in range(depth-1):
             add_units += growth_rate
             parameters.append(rm.BatchNormalize())
-            parameters.append(rm.Dense(add_units))
+            parameters.append(rm.Dense(add_units,
+                initializer=initializer
+            ))
         self.hidden = rm.Sequential(parameters)
         self.input_batch = rm.BatchNormalize()
         self.input = rm.Dense(units)
@@ -32,25 +38,29 @@ class DenseNet(rm.Model):
             self.multi_output = True
             parameters = []
             for _ in range(output_shape[0]):
-                parameters.append(rm.Dense(output_shape[1]))
+                parameters.append(rm.BatchNormalize())
+                parameters.append(rm.Dense(output_shape[1],
+                    initializer=initializer
+                ))
             self.output = rm.Sequential(parameters)
         else:
             self.output = rm.Dense(output_shape)
     
     def forward(self, x):
         layers = self.hidden._layers
-        hidden = self.input(rm.relu(self.input_batch(x)))
+        hidden = self.input(self.active(self.input_batch(x)))
         for i in range(self.depth-1):
-            sub = rm.relu(layers[i*2](hidden))
+            sub = self.active(layers[i*2](hidden))
             sub = layers[i*2+1](sub)
             if self.dropout:
-                sub = rm.dropout(sub)
+                sub = rm.dropout(sub, dropout_ratio=0.2)
             hidden = rm.concat(hidden, sub)
         if self.multi_output:
             layers = self.output._layers
             outputs = []
             for i in range(self.output_shape[0]):
-                outputs.append(layers[i](hidden))
+                hidden=self.active(layers[i*2](hidden))
+                outputs.append(layers[i*2+1](hidden))
             return outputs
         return self.output(hidden)
 

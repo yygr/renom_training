@@ -102,7 +102,7 @@ class Dec(rm.Model):
         self.dropout = dropout
         parameters = []
         dim = output_shape[0]
-        channels = 1 # Gray
+        channels = 16 
         while dim%2 == 0 and dim > 2:
             parameters.append(rm.Deconv2d(
                 channel=channels, stride=2, filter=2))

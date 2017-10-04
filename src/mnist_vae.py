@@ -33,9 +33,9 @@ if 0:
 else:
     data = np.load('mnist/data.npy')
 
-y_train = data[0][0].astype('float32')/255.
+y_train = data[0][0]
 x_train = data[0][1].astype('float32')/255.
-y_test = data[1][0].astype('float32')/255.
+y_test = data[1][0]
 x_test = data[1][1].astype('float32')/255.
 
 
@@ -43,14 +43,15 @@ set_cuda_active(True)
 seed(10)
 
 latent_dim = 2
-enc = VGG_Enc()
-dec = Dec(latent_dim = latent_dim)
+enc = VGG_Enc(latent_dim = latent_dim)
+dec = Dec()
 vae = Vae2d(enc, dec)
-loss = vae(x_train[:10])
 
 optimizer = rm.Adam()
 
-epoch = 2 
+#x_train = x_train[permutation(len(x_train))[:10000]]
+
+epoch = 10 
 batch_size = 256
 N = len(x_train)
 curve = []
@@ -77,20 +78,38 @@ for e in range(epoch):
     curve.append([kl_loss, recon_loss])
     print('#{} KL:{:.3f} ReconE:{:.3f} @ {:.1f}sec'.format(
         e, kl_loss, recon_loss, loss_na[:,2].sum()))
-if latent_dim == 2:
-    z_mean, z_log_var = enc(x_train[perm[:100]])
-    lft, rgt = z_mean[:,0].min(), z_mean[:,0].max()
-    lwr, upr = z_mean[:,1].min(), z_mean[:,1].max()
-    # 10 x 10 
-    cv = np.zeros((10*28, 10*28))
-    h = np.linspace(lft, rgt, 10)
-    v = np.linspace(lwr, upr, 10)
-    for i in range(10):
-        for j in range(10):
-            cv[i*28:(i+1)*28, j*28:(j+1)*28] = dec(
-                np.array([h[i],v[j]]).reshape(1, 2)
-            ).reshape(28, 28)
-    cv *= 255
-    cv = cv.dtype('uint8')
-    io.imshow(cv)
-    io.imsave('result/decode.png')
+
+    if latent_dim == 2:
+        res, _ = enc(x_test[:batch_size])
+        res = res.as_ndarray()
+        for i in range(batch_size, len(x_test), batch_size):
+            z_mean, _ = enc(x_test[i:i+batch_size])
+            res = np.r_[res, z_mean.as_ndarray()]
+        plt.clf()
+        plt.scatter(res[:,0], res[:,1], c=y_test)
+        plt.savefig('result/vae_latent{}.png'.format(e))
+
+        z_mean, _ = enc(x_train[perm[:batch_size]])
+        z_mean = z_mean.as_ndarray()
+        lft, rgt = z_mean[:,0].min(), z_mean[:,0].max()
+        lwr, upr = z_mean[:,1].min(), z_mean[:,1].max()
+        # 16 x 16 = 256
+        res_dim = 16
+        cv = np.zeros((res_dim*28, res_dim*28))
+        h = np.linspace(lft, rgt, res_dim)
+        v = np.linspace(lwr, upr, res_dim)
+        data = []
+        for i in range(res_dim):
+            for j in range(res_dim):
+                data.append(
+                    np.array([h[i],v[j]])
+                )
+        res = dec(np.array(data)).as_ndarray()
+        for i in range(res_dim):
+            for j in range(res_dim):
+                cv[i*28:(i+1)*28, j*28:(j+1)*28] = res[
+                    i*res_dim + j
+                ].reshape(28, 28)
+        cv *= 255
+        cv = cv.astype('uint8')
+        io.imsave('result/decode{}.png'.format(e), cv)

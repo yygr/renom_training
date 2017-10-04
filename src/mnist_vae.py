@@ -42,8 +42,9 @@ x_test = data[1][1].astype('float32')/255.
 set_cuda_active(True)
 seed(10)
 
+latent_dim = 2
 enc = VGG_Enc()
-dec = Dec(latent_dim = 2)
+dec = Dec(latent_dim = latent_dim)
 vae = Vae2d(enc, dec)
 loss = vae(x_train[:10])
 

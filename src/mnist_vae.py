@@ -39,6 +39,7 @@ y_test = data[1][0]
 x_test = data[1][1].astype('float32')/255.
 
 
+
 set_cuda_active(True)
 seed(10)
 

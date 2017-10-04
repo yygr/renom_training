@@ -134,8 +134,8 @@ class Dec(rm.Model):
             else:
                 h = rm.relu(layers[i](h))
             #print(h.shape)
-        h = rm.sigmoid(self.output(h))
-        return h
+        #h = rm.sigmoid(self.output(h))
+        return self.output(h)
 
 class Vae2d(rm.Model):
     def __init__(self, enc, dec):

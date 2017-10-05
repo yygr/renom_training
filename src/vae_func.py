@@ -78,11 +78,12 @@ class VGG_Enc(rm.Model):
         self.max_channels = max_channels
         parameters = []
         channels = np.log(max_channels)/np.log(2)-self.depth + 1
+        boot_th = np.log(self.input_shape[0])/np.log(2)
         print('--- Ecoding Network ---')
         boot_steps = 0
-        if channels <= 3:
-            boot_steps = 3 - channels
-            channels = 3
+        if boot_th < self.depth:
+            boot_steps = int(self.depth - boot_th) + 1
+            channels = 3 
         channels = int(2**channels)
         boot_steps = int(boot_steps)
         dim = self.input_shape[0]
@@ -90,24 +91,26 @@ class VGG_Enc(rm.Model):
             if self.batch_normal:
                 print('Conv2d {}x{} {}ch'.format(dim, dim, channels))
                 parameters.append(rm.Conv2d(channels, padding=(1,1)))
+                print('Batch Normalize')
                 parameters.append(rm.BatchNormalize())
                 print('Conv2d {}x{} {}ch'.format(dim, dim, channels))
                 parameters.append(rm.Conv2d(channels, padding=(1,1)))
+                print('Batch Normalize')
                 parameters.append(rm.BatchNormalize())
             else:
                 print('Conv2d {}x{} {}ch'.format(dim, dim, channels))
                 parameters.append((rm.Conv2d(channels, padding=(1,1))))
                 print('Conv2d {}x{} {}ch'.format(dim, dim, channels))
                 parameters.append((rm.Conv2d(channels, padding=(1,1))))
-            dim = dim // 2
-            print('Max Pooling {}x{}'.format(dim, dim))
-        for _ in range(self.depth - boot_steps):
+        for i in range(self.depth - boot_steps):
             if self.batch_normal:
                 print('Conv2d {}x{} {}ch'.format(dim, dim, channels))
                 parameters.append(rm.Conv2d(channels, padding=(1,1)))
+                print('Batch Normalize')
                 parameters.append(rm.BatchNormalize())
                 print('Conv2d {}x{} {}ch'.format(dim, dim, channels))
                 parameters.append(rm.Conv2d(channels, padding=(1,1)))
+                print('Batch Normalize')
                 parameters.append(rm.BatchNormalize())
             else:
                 print('Conv2d {}x{} {}ch'.format(dim, dim, channels))
@@ -116,7 +119,10 @@ class VGG_Enc(rm.Model):
                 parameters.append((rm.Conv2d(channels, padding=(1,1))))
             channels *= 2
             dim = dim // 2
-            print('Max Pooling {}x{}'.format(dim, dim))
+            if i == self.depth - boot_steps - 1:
+                print('Average Pooling {}x{}'.format(dim, dim))
+            else:
+                print('Max Pooling {}x{}'.format(dim, dim))
         self.hidden = rm.Sequential(parameters)
         nb_parameters = dim * dim * channels
         print('Flatten {} params'.format(nb_parameters))
@@ -148,7 +154,10 @@ class VGG_Enc(rm.Model):
                 #print(x.shape)
                 x = rm.relu(layers[i*2+1](x))
                 #print(x.shape)
-            x = rm.max_pool2d(x, stride=2, padding=(1,1))
+            if i == self.depth - 1:
+                x = rm.average_pool2d(x, stride=2, padding=(1,1))
+            else:
+                x = rm.max_pool2d(x, stride=2, padding=(1,1))
             #print(x.shape)
         x = rm.flatten(x)
         layers = self.fcnn._layers
@@ -160,6 +169,125 @@ class VGG_Enc(rm.Model):
         z_mean = layers[-2](x)
         z_log_var = layers[-1](x)
         return z_mean, z_log_var
+
+class Densenet_Enc(rm.Model):
+    def denseblock(self,
+        dim = 8,
+        input_channels=10,
+        dropout=False
+        ):
+        parameters = []
+        c = input_channels
+        print('-> {}'.format(c))
+        for _ in range(self.depth):
+            c += self.growth_rate
+            print('Batch Normalize')
+            parameters.append(rm.BatchNormalize())
+            print(' Conv2d > {}x{} {}ch'.format(
+                dim, dim, self.growth_rate 
+            ))
+            parameters.append(rm.Conv2d(
+                self.growth_rate, filter=3, padding=(1,1)
+            ))
+            if self.dropout:
+                print('Dropout')
+        c = int(c*self.compression)
+        print('*Conv2d > {}x{} {}ch'.format(
+            dim, dim, c 
+        ))
+        parameters.append(rm.Conv2d(
+            c, filter=1
+        ))
+        print(' Average Pooling')
+        print('<- {}'.format(c))
+        return parameters, c 
+
+    def __init__(
+            self,
+            input_shape = (28, 28),
+            blocks = 2,
+            depth = 3,
+            growth_rate = 12,
+            latent_dim = 10,
+            dropout = False,
+            intermidiate_dim = 128,
+            compression = 0.5,
+            initial_channel = 8
+        ):
+        self.depth = depth
+        self.input_shape = input_shape
+        self.latent_dim = latent_dim
+        self.dropout = dropout
+        self.intermidiate_dim = intermidiate_dim
+        self.compression = compression
+        self.growth_rate = growth_rate
+        self.blocks = blocks
+        print('--- Ecoding Network ---')
+        parameters = []
+        channels = initial_channel
+        dim = self.input_shape[0]
+        print('Input image {}x{}'.format(dim, dim))
+        dim = dim // 2
+        print(' Conv2d > {}x{} {}ch'.format(dim,dim,channels))
+        self.input = rm.Conv2d(channels, filter=5, padding=2, stride=2)
+        for _ in range(blocks):
+            t_params, channels = self.denseblock(
+                    dim=dim,
+                    input_channels=channels,
+            )
+            parameters += t_params
+            dim = dim // 2
+        self.hidden = rm.Sequential(parameters)
+        nb_parameters = dim * dim * channels
+        print(' Flatten {} params'.format(nb_parameters))
+        parameters = []
+        fcnn_depth = int((np.log(nb_parameters/intermidiate_dim))/np.log(4))
+        nb_parameters = nb_parameters // 4 
+        for _ in range(fcnn_depth):
+            print(' Dense {}u'.format(nb_parameters))
+            parameters.append(rm.Dense(nb_parameters))
+            nb_parameters = nb_parameters // 4 
+        print(' Dense {}u'.format(intermidiate_dim))
+        parameters.append(rm.Dense(intermidiate_dim))
+        print('*Mean Dense {}u'.format(latent_dim))
+        parameters.append(rm.Dense(latent_dim, initializer=Uniform()))
+        print('*Log Var Dense {}u'.format(latent_dim))
+        parameters.append(rm.Dense(latent_dim, initializer=Gaussian(std=0.3)))
+        self.fcnn = rm.Sequential(parameters)
+
+    def forward(self, x):
+        hidden = self.input(x)
+        #print(hidden.shape)
+        hidden = rm.max_pool2d(hidden, stride=1, padding=1)
+        #print(hidden.shape)
+        layers = self.hidden._layers
+        for i in range(self.blocks):
+            offset = i*self.depth*2 if i == 0 else i*self.depth*2+1
+            for j in range(self.depth):
+                sub = rm.relu(layers[offset+2*j](hidden))
+                #print('{}.{} b {}'.format(i,j,sub.shape))
+                sub = layers[offset+2*j+1](sub)
+                #print('{}.{} + {}'.format(i,j,sub.shape))
+                if self.dropout:
+                    sub = rm.dropout(sub)
+                hidden = rm.concat(hidden, sub)
+                #print('{}.{} = {}'.format(i,j,hidden.shape))
+            offset = (i+1)*self.depth*2 if i==0 else (i+1)*self.depth*2+1
+            hidden = layers[offset](hidden)
+            #print('{}.{} - {}'.format(i,j,hidden.shape))
+            hidden = rm.average_pool2d(hidden, stride=2, padding=1)
+            #print('{}.{} > {}'.format(i,j,hidden.shape))
+        x = rm.flatten(x)
+        layers = self.fcnn._layers
+        for i in range(len(layers[:-2])):
+            x = rm.relu(layers[i](x))
+            #print(x.shape)
+            if self.dropout:
+                x = rm.dropout(x, dropout_ratio=0.5)
+        z_mean = layers[-2](x)
+        z_log_var = layers[-1](x)
+        return z_mean, z_log_var
+
 
 class Dec(rm.Model):
     def __init__(

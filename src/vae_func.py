@@ -5,6 +5,7 @@ import matplotlib as mpl
 from pdb import set_trace
 from numpy import random
 from time import time
+from renom.utility.initializer import Gaussian, Uniform
 
 class keras_Enc(rm.Model):
     def __init__(self):
@@ -21,8 +22,8 @@ class keras_Enc(rm.Model):
             rm.Relu(),
         ])
         self.output = rm.Sequential([
-            rm.Dense(2),
-            rm.Dense(2),
+            rm.Dense(2, initializer=Uniform()),
+            rm.Dense(2, initializer=Gaussian(std=0.3)),
         ])
         self.latent_dim = 2
     def forward(self, x):
@@ -64,52 +65,74 @@ class VGG_Enc(rm.Model):
             depth = 4,#28x28 -> 14x14 -> 7x7 -> 4x4 -> 2x2
             batch_normal = False,
             latent_dim = 10,
-            dropout = False
+            dropout = False,
+            intermidiate_dim = 128,
+            max_channels = 64,
         ):
         self.depth = depth
         self.batch_normal = batch_normal
         self.input_shape = input_shape
         self.latent_dim = latent_dim
         self.dropout = dropout
+        self.intermidiate_dim = intermidiate_dim
+        self.max_channels = max_channels
         parameters = []
-        channels = np.log(1024)/np.log(2)-self.depth + 1
+        channels = np.log(max_channels)/np.log(2)-self.depth + 1
+        print('--- Ecoding Network ---')
         boot_steps = 0
         if channels <= 3:
             boot_steps = 3 - channels
             channels = 3
         channels = int(2**channels)
+        boot_steps = int(boot_steps)
+        dim = self.input_shape[0]
         for _ in range(boot_steps):
             if self.batch_normal:
+                print('Conv2d {}x{} {}ch'.format(dim, dim, channels))
                 parameters.append(rm.Conv2d(channels, padding=(1,1)))
                 parameters.append(rm.BatchNormalize())
+                print('Conv2d {}x{} {}ch'.format(dim, dim, channels))
                 parameters.append(rm.Conv2d(channels, padding=(1,1)))
                 parameters.append(rm.BatchNormalize())
             else:
+                print('Conv2d {}x{} {}ch'.format(dim, dim, channels))
                 parameters.append((rm.Conv2d(channels, padding=(1,1))))
+                print('Conv2d {}x{} {}ch'.format(dim, dim, channels))
                 parameters.append((rm.Conv2d(channels, padding=(1,1))))
+            dim = dim // 2
+            print('Max Pooling {}x{}'.format(dim, dim))
         for _ in range(self.depth - boot_steps):
             if self.batch_normal:
+                print('Conv2d {}x{} {}ch'.format(dim, dim, channels))
                 parameters.append(rm.Conv2d(channels, padding=(1,1)))
                 parameters.append(rm.BatchNormalize())
+                print('Conv2d {}x{} {}ch'.format(dim, dim, channels))
                 parameters.append(rm.Conv2d(channels, padding=(1,1)))
                 parameters.append(rm.BatchNormalize())
             else:
+                print('Conv2d {}x{} {}ch'.format(dim, dim, channels))
                 parameters.append((rm.Conv2d(channels, padding=(1,1))))
+                print('Conv2d {}x{} {}ch'.format(dim, dim, channels))
                 parameters.append((rm.Conv2d(channels, padding=(1,1))))
             channels *= 2
+            dim = dim // 2
+            print('Max Pooling {}x{}'.format(dim, dim))
         self.hidden = rm.Sequential(parameters)
-        nb_parameters = int(
-                np.log(input_shape[0]*input_shape[1])
-                / np.log(self.depth)
-            )*1024
+        nb_parameters = dim * dim * channels
+        print('Flatten {} params'.format(nb_parameters))
         parameters = []
-        fcnn_depth = int((np.log(nb_parameters) - np.log(latent_dim))/np.log(4))
+        fcnn_depth = int((np.log(nb_parameters/intermidiate_dim))/np.log(4))
         nb_parameters = nb_parameters // 4 
         for _ in range(fcnn_depth):
+            print('Dense {}u'.format(nb_parameters))
             parameters.append(rm.Dense(nb_parameters))
             nb_parameters = nb_parameters // 4 
-        parameters.append(rm.Dense(latent_dim))
-        parameters.append(rm.Dense(latent_dim))
+        print('Dense {}u'.format(intermidiate_dim))
+        parameters.append(rm.Dense(intermidiate_dim))
+        print('*Mean Dense {}u'.format(latent_dim))
+        parameters.append(rm.Dense(latent_dim, initializer=Uniform()))
+        print('*Log Var Dense {}u'.format(latent_dim))
+        parameters.append(rm.Dense(latent_dim, initializer=Gaussian(std=0.3)))
         self.fcnn = rm.Sequential(parameters)
 
     def forward(self, x):
@@ -145,37 +168,51 @@ class Dec(rm.Model):
             output_shape = (28, 28), # 正方行列を仮定
             #28x28 <- 14x14 <- 7x7 <-* 1024x2x2
             batch_normal = False,
-            dropout = False
+            dropout = False,
+            min_channels = 16,
         ):
         self.batch_normal = batch_normal
         self.latent_dim = latent_dim
         self.output_shape = output_shape
         self.dropout = dropout
+        self.min_channels = min_channels
+        print('--- Decoding Network ---')
         parameters = []
+        print_params = []
         dim = output_shape[0]
-        channels = 16 
+        channels = self.min_channels
         while dim%2 == 0 and dim > 2:
             parameters.append(rm.Deconv2d(
                 channel=channels, stride=2, filter=2))
             if batch_normal:
                 parameters.append(rm.BatchNormalize())
             dim = dim // 2
-            channels *= 4
+            print_params.append([dim, channels])
+            channels *= 2
         if dim%2 == 1:
             parameters.append(rm.Deconv2d(
                 channel=channels, stride=2, filter=3))
             dim = (dim - 1) // 2
-            channels *= 4
+            print_params.append([dim, channels])
+            channels *= 2
         parameters.reverse()
+        print_params.reverse()
+        print('Dense {}x{}x{} & Reshape'.format(dim, dim,channels))
+        self.channels = channels
+        self.transform = rm.Dense(channels*1*dim*dim)
+        for item in print_params:
+            print('Deconv2d to {}x{} {}ch '.format(
+                item[0], item[0], item[1]))
         self.hidden = rm.Sequential(parameters)
-        self.transform = rm.Dense(1024*1*dim*dim)
         self.output = rm.Conv2d(channel=1,stride=1,filter=1)
+        print('Conv2d to {}x{} 1ch'.format(
+            output_shape[0], output_shape[0]))
         self.dim = dim
 
     def forward(self, x):
         h = self.transform(x)
         #print(h.shape)
-        h = rm.reshape(h, (len(x), 1024, self.dim, self.dim))
+        h = rm.reshape(h, (len(x), self.channels, self.dim, self.dim))
         #print(h.shape)
         layers = self.hidden._layers
         for i in range(len(layers)):
@@ -202,10 +239,10 @@ class Vae2d(rm.Model):
         nb, zd = self.z_log_var.shape
         self.kl_loss = - 0.5 * rm.sum(
             1 + self.z_log_var - self.z_mean**2 - rm.exp(self.z_log_var)
-            )
+            )/nb
         #self.recon_loss = rm.sigmoid_cross_entropy(self.decoded, x) 
         self.recon_loss = rm.mean_squared_error(self.decoded, x) 
-        vae_loss = self.kl_loss/nb + self.recon_loss
+        vae_loss = self.kl_loss + self.recon_loss
         return vae_loss 
 
     

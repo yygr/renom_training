@@ -44,10 +44,10 @@ set_cuda_active(True)
 seed(10)
 
 latent_dim = 2
-#enc = VGG_Enc(latent_dim = latent_dim)
-#dec = Dec()
-enc = keras_Enc()
-dec = keras_Dec()
+enc = VGG_Enc(latent_dim = latent_dim)
+dec = Dec()
+#enc = keras_Enc()
+#dec = keras_Dec()
 vae = Vae2d(enc, dec)
 
 optimizer = rm.Adam()
@@ -79,8 +79,8 @@ for e in range(epoch):
             offset, N, kl_loss, recon_loss, (N-offset)/batch_size*s_mean),
             flush=True, end='\r')
     curve.append([kl_loss, recon_loss])
-    print('#{} KL:{:.3f} ReconE:{:.3f} @ {:.1f}sec'.format(
-        e, kl_loss, recon_loss, loss_na[:,2].sum()))
+    print('#{} KL:{:.3f} ReconE:{:.3f} @ {:.1f}sec {:>10}'.format(
+        e, kl_loss, recon_loss, loss_na[:,2].sum(), ''))
 
     if latent_dim == 2:
         res, _ = enc(x_test[:batch_size])
@@ -90,7 +90,7 @@ for e in range(epoch):
             res = np.r_[res, z_mean.as_ndarray()]
         plt.clf()
         plt.scatter(res[:,0], res[:,1], c=y_test)
-        plt.savefig('result/_vae_latent{}.png'.format(e))
+        plt.savefig('result/vae_latent{}.png'.format(e))
 
         z_mean, _ = enc(x_train[perm[:batch_size]])
         z_mean = z_mean.as_ndarray()
@@ -115,4 +115,4 @@ for e in range(epoch):
                 ].reshape(28, 28)
         cv *= 255
         cv = cv.astype('uint8')
-        io.imsave('result/_decode{}.png'.format(e), cv)
+        io.imsave('result/decode{}.png'.format(e), cv)

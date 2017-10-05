@@ -9,7 +9,7 @@ from time import time
 from skimage import io
 from glob import glob
 import gzip
-from vae_func import VGG_Enc, Dec, Vae2d, keras_Enc, keras_Dec
+from vae_func import VGG_Enc, Dec, Vae2d, keras_Enc, keras_Dec, Densenet_Enc
 from renom.cuda.cuda import set_cuda_active
 from numpy.random import seed, permutation
 
@@ -38,24 +38,38 @@ x_train = data[0][1].astype('float32')/255.
 y_test = data[1][0]
 x_test = data[1][1].astype('float32')/255.
 
-
-
 set_cuda_active(True)
 seed(10)
 
 latent_dim = 2
-enc = VGG_Enc(latent_dim = latent_dim)
-dec = Dec()
-#enc = keras_Enc()
-#dec = keras_Dec()
+epoch = 10 
+batch_size = 256
+
+model = 'densenet'
+
+if model == 'vgg':
+    enc = VGG_Enc(
+        latent_dim = latent_dim,
+        max_channels=64, 
+        intermidiate_dim = 16,
+        depth=4,
+        batch_normal=True)
+elif model == 'densenet':
+    enc = Densenet_Enc(
+        initial_channel=8,
+        growth_rate=12,
+        latent_dim=latent_dim)
+else:
+    enc = keras_Enc()
+if 1:
+    dec = Dec()
+else:
+    dec = keras_Dec()
+
 vae = Vae2d(enc, dec)
 
 optimizer = rm.Adam()
 
-#x_train = x_train[permutation(len(x_train))[:10000]]
-
-epoch = 10 
-batch_size = 256
 N = len(x_train)
 curve = []
 for e in range(epoch):
@@ -90,7 +104,7 @@ for e in range(epoch):
             res = np.r_[res, z_mean.as_ndarray()]
         plt.clf()
         plt.scatter(res[:,0], res[:,1], c=y_test)
-        plt.savefig('result/vae_latent{}.png'.format(e))
+        plt.savefig('result/{}_latent{}.png'.format(model, e))
 
         z_mean, _ = enc(x_train[perm[:batch_size]])
         z_mean = z_mean.as_ndarray()
@@ -107,7 +121,8 @@ for e in range(epoch):
                 data.append(
                     np.array([h[i],v[j]])
                 )
-        res = dec(np.array(data)).as_ndarray()
+        data = np.array(data).astype('float32')
+        res = dec(data).as_ndarray()
         for i in range(res_dim):
             for j in range(res_dim):
                 cv[i*28:(i+1)*28, j*28:(j+1)*28] = res[
@@ -115,4 +130,4 @@ for e in range(epoch):
                 ].reshape(28, 28)
         cv *= 255
         cv = cv.astype('uint8')
-        io.imsave('result/decode{}.png'.format(e), cv)
+        io.imsave('result/{}_decode{}.png'.format(model, e), cv)

@@ -171,37 +171,6 @@ class VGG_Enc(rm.Model):
         return z_mean, z_log_var
 
 class Densenet_Enc(rm.Model):
-    def denseblock(self,
-        dim = 8,
-        input_channels=10,
-        dropout=False
-        ):
-        parameters = []
-        c = input_channels
-        print('-> {}'.format(c))
-        for _ in range(self.depth):
-            c += self.growth_rate
-            print('Batch Normalize')
-            parameters.append(rm.BatchNormalize())
-            print(' Conv2d > {}x{} {}ch'.format(
-                dim, dim, self.growth_rate 
-            ))
-            parameters.append(rm.Conv2d(
-                self.growth_rate, filter=3, padding=(1,1)
-            ))
-            if self.dropout:
-                print('Dropout')
-        c = int(c*self.compression)
-        print('*Conv2d > {}x{} {}ch'.format(
-            dim, dim, c 
-        ))
-        parameters.append(rm.Conv2d(
-            c, filter=1
-        ))
-        print(' Average Pooling')
-        print('<- {}'.format(c))
-        return parameters, c 
-
     def __init__(
             self,
             input_shape = (28, 28),
@@ -254,6 +223,38 @@ class Densenet_Enc(rm.Model):
         print('*Log Var Dense {}u'.format(latent_dim))
         parameters.append(rm.Dense(latent_dim, initializer=Gaussian(std=0.3)))
         self.fcnn = rm.Sequential(parameters)
+
+    def denseblock(self,
+        dim = 8,
+        input_channels=10,
+        dropout=False
+        ):
+        parameters = []
+        c = input_channels
+        print('-> {}'.format(c))
+        for _ in range(self.depth):
+            c += self.growth_rate
+            print('Batch Normalize')
+            parameters.append(rm.BatchNormalize())
+            print(' Conv2d > {}x{} {}ch'.format(
+                dim, dim, self.growth_rate 
+            ))
+            parameters.append(rm.Conv2d(
+                self.growth_rate, filter=3, padding=(1,1)
+            ))
+            if self.dropout:
+                print('Dropout')
+        c = int(c*self.compression)
+        print('*Conv2d > {}x{} {}ch'.format(
+            dim, dim, c 
+        ))
+        parameters.append(rm.Conv2d(
+            c, filter=1
+        ))
+        print(' Average Pooling')
+        print('<- {}'.format(c))
+        return parameters, c 
+
 
     def forward(self, x):
         hidden = self.input(x)

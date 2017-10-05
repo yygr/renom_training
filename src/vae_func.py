@@ -6,6 +6,57 @@ from pdb import set_trace
 from numpy import random
 from time import time
 
+class keras_Enc(rm.Model):
+    def __init__(self):
+        self.hidden = rm.Sequential([
+            rm.Conv2d(1, filter=2, padding=1),
+            rm.Relu(),
+            rm.Conv2d(64, filter=2, padding=1, stride=2),
+            rm.Relu(),
+            rm.Conv2d(64, filter=3, padding=1),
+            rm.Relu(),
+            rm.Conv2d(64, filter=3, padding=1),
+            rm.Flatten(),
+            rm.Dense(128),
+            rm.Relu(),
+        ])
+        self.output = rm.Sequential([
+            rm.Dense(2),
+            rm.Dense(2),
+        ])
+        self.latent_dim = 2
+    def forward(self, x):
+        x = self.hidden(x)
+        #print("#", x.shape)
+        z_mean = self.output._layers[0]
+        z_log_var = self.output._layers[1]
+        return z_mean(x), z_log_var(x)
+
+class keras_Dec(rm.Model):
+    def __init__(self):
+        self.input = rm.Sequential([
+           rm.Dense(64*14*14),
+           rm.Relu(),
+        ])
+        self.hidden = rm.Sequential([
+            rm.Deconv2d(64, filter=3, padding=1),
+            rm.Relu(),
+            rm.Deconv2d(64, filter=3, padding=1),
+            rm.Relu(),
+            rm.Deconv2d(64, filter=3, stride=2),
+            rm.Relu(),
+            rm.Conv2d(1, filter=2),
+            rm.Sigmoid()
+        ])
+    def forward(self, x):
+        hidden = self.input(x)
+        #print(hidden.shape)
+        hidden = rm.reshape(hidden, (len(x), 64, 14, 14))
+        #print(hidden.shape)
+        hidden = self.hidden(hidden)
+        #print(hidden.shape)
+        return hidden
+       
 class VGG_Enc(rm.Model):
     def __init__(
             self,
@@ -79,12 +130,12 @@ class VGG_Enc(rm.Model):
         x = rm.flatten(x)
         layers = self.fcnn._layers
         for i in range(len(layers[:-2])):
-            x = rm.sigmoid(layers[i](x))
+            x = rm.relu(layers[i](x))
             #print(x.shape)
             if self.dropout:
                 x = rm.dropout(x, dropout_ratio=0.5)
-        z_mean = rm.tanh(layers[-2](x))
-        z_log_var = rm.tanh(layers[-1](x))
+        z_mean = layers[-2](x)
+        z_log_var = layers[-1](x)
         return z_mean, z_log_var
 
 class Dec(rm.Model):
@@ -134,8 +185,8 @@ class Dec(rm.Model):
             else:
                 h = rm.relu(layers[i](h))
             #print(h.shape)
-        #h = rm.sigmoid(self.output(h))
-        return self.output(h)
+        h = rm.sigmoid(self.output(h))
+        return h
 
 class Vae2d(rm.Model):
     def __init__(self, enc, dec):
@@ -152,7 +203,8 @@ class Vae2d(rm.Model):
         self.kl_loss = - 0.5 * rm.sum(
             1 + self.z_log_var - self.z_mean**2 - rm.exp(self.z_log_var)
             )
-        self.recon_loss = rm.sigmoid_cross_entropy(self.decoded, x) 
+        #self.recon_loss = rm.sigmoid_cross_entropy(self.decoded, x) 
+        self.recon_loss = rm.mean_squared_error(self.decoded, x) 
         vae_loss = self.kl_loss/nb + self.recon_loss
         return vae_loss 
 

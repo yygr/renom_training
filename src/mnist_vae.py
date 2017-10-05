@@ -9,7 +9,7 @@ from time import time
 from skimage import io
 from glob import glob
 import gzip
-from vae_func import VGG_Enc, Dec, Vae2d
+from vae_func import VGG_Enc, Dec, Vae2d, keras_Enc, keras_Dec
 from renom.cuda.cuda import set_cuda_active
 from numpy.random import seed, permutation
 
@@ -44,8 +44,10 @@ set_cuda_active(True)
 seed(10)
 
 latent_dim = 2
-enc = VGG_Enc(latent_dim = latent_dim)
-dec = Dec()
+#enc = VGG_Enc(latent_dim = latent_dim)
+#dec = Dec()
+enc = keras_Enc()
+dec = keras_Dec()
 vae = Vae2d(enc, dec)
 
 optimizer = rm.Adam()
@@ -88,7 +90,7 @@ for e in range(epoch):
             res = np.r_[res, z_mean.as_ndarray()]
         plt.clf()
         plt.scatter(res[:,0], res[:,1], c=y_test)
-        plt.savefig('result/vae_latent{}.png'.format(e))
+        plt.savefig('result/_vae_latent{}.png'.format(e))
 
         z_mean, _ = enc(x_train[perm[:batch_size]])
         z_mean = z_mean.as_ndarray()
@@ -113,4 +115,4 @@ for e in range(epoch):
                 ].reshape(28, 28)
         cv *= 255
         cv = cv.astype('uint8')
-        io.imsave('result/decode{}.png'.format(e), cv)
+        io.imsave('result/_decode{}.png'.format(e), cv)

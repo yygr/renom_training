@@ -56,9 +56,11 @@ if model == 'vgg':
         batch_normal=True)
 elif model == 'densenet':
     enc = Densenet_Enc(
-        initial_channel=8,
-        growth_rate=12,
-        latent_dim=latent_dim)
+        initial_channel=4,
+        growth_rate=4,
+        latent_dim=latent_dim,
+        blocks=3,
+        )
 else:
     enc = keras_Enc()
 if 1:

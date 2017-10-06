@@ -205,7 +205,7 @@ class Densenet_Enc(rm.Model):
                     input_channels=channels,
             )
             parameters += t_params
-            dim = dim // 2
+            dim = (dim+1) // 2
         self.hidden = rm.Sequential(parameters)
         nb_parameters = dim * dim * channels
         print(' Flatten {} params'.format(nb_parameters))
@@ -263,7 +263,7 @@ class Densenet_Enc(rm.Model):
         #print(hidden.shape)
         layers = self.hidden._layers
         for i in range(self.blocks):
-            offset = i*self.depth*2 if i == 0 else i*self.depth*2+1
+            offset = i*(self.depth*2+1)
             for j in range(self.depth):
                 sub = rm.relu(layers[offset+2*j](hidden))
                 #print('{}.{} b {}'.format(i,j,sub.shape))
@@ -273,7 +273,7 @@ class Densenet_Enc(rm.Model):
                     sub = rm.dropout(sub)
                 hidden = rm.concat(hidden, sub)
                 #print('{}.{} = {}'.format(i,j,hidden.shape))
-            offset = (i+1)*self.depth*2 if i==0 else (i+1)*self.depth*2+1
+            offset = (i+1)*(self.depth*2+1)-1
             hidden = layers[offset](hidden)
             #print('{}.{} - {}'.format(i,j,hidden.shape))
             hidden = rm.average_pool2d(hidden, stride=2, padding=1)

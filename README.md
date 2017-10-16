@@ -13,3 +13,5 @@ python src/dcgan_mnist.py
 
 ![dcgan](https://raw.githubusercontent.com/yygr/renom_training/master/result/dcgan_fake.png)
 
+After 95 epochs
+![dcgan95](https://raw.githubusercontent.com/yygr/renom_training/master/result/dcgan_fake95.png)

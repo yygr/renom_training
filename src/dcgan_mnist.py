@@ -39,10 +39,13 @@ x_train = data[0][1].astype('float32')/255.
 y_test = data[1][0]
 x_test = data[1][1].astype('float32')/255.
 
+x_train = x_train * 2 - 1
+x_test = x_test * 2 - 1
+
 set_cuda_active(True)
 seed(10)
 
-latent_dim = 20
+latent_dim = 200
 epoch = 30
 batch_size = 256
 
@@ -100,7 +103,7 @@ for e in range(epoch):
             offset, N, code, gan_loss_, gen_loss_, real_cost, fake_cost, 
             (N-offset)/batch_size*s_mean), flush=True, end='\r')
     curve.append([gan_loss, gen_loss])
-    print('#{:>12} GAN:{:.3f} Gen:{:.3f} Real:{:.3f} Fake:{:.3f} @ {:.1f}sec {:>100}'.format(
+    print('#{:>12} GAN:{:.3f} Gen:{:.3f} Real:{:.3f} Fake:{:.3f} @ {:.1f}sec {:>10}'.format(
         e, gan_loss, gen_loss_, real_cost_, fake_cost_, loss_na[:,-1].sum(), ''))
     res_dim = 16
     cv = np.zeros((res_dim*28, res_dim*28))

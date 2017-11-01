@@ -66,32 +66,35 @@ class Gen(rm.Model):
                 h = rm.relu(layers[i](h))
             #print(h.shape)
         h = self.output(h)
-        return rm.sigmoid(h)
+        #return rm.sigmoid(h)
+        return rm.tanh(h)
 
 class Dis(rm.Model):
     def __init__(self,):
-        channel = 16
-        intermidiate_dim = 64
+        channel = 8
+        intermidiate_dim = 128
         self.cnn1 = rm.Sequential([
             # 28x28 -> 28x28
             rm.Conv2d(channel=channel,filter=3,stride=1,padding=1),
+            rm.LeakyRelu(),
+            rm.Dropout(),
             # 28x28 -> 14x14
-            rm.LeakyRelu(), 
+            rm.Conv2d(channel=channel*2,filter=3,stride=2,padding=1),
+            rm.LeakyRelu(),
             rm.Dropout(),
-            rm.Conv2d(channel=channel,filter=3,stride=2,padding=1),
             # 14x14 -> 8x8
+            rm.Conv2d(channel=channel*4,filter=3,stride=2,padding=2),
             rm.LeakyRelu(),
             rm.Dropout(),
-            rm.Conv2d(channel=channel*2,filter=3,stride=2,padding=2),
             # 8x8 -> 4x4
+            rm.Conv2d(channel=channel*8,filter=3,stride=2,padding=1),
             rm.LeakyRelu(),
             rm.Dropout(),
-            rm.Conv2d(channel=channel*4,filter=3,stride=2,padding=1),
         ])
         self.cnn2 = rm.Sequential([
-            rm.LeakyRelu(),
-            rm.Dropout(),
+            #rm.Dropout(),
             rm.Flatten(),
+            #rm.Dense(intermidiate_dim)
         ])
         self.output = rm.Dense(1)
     def forward(self, x):

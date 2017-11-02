@@ -32,16 +32,16 @@ class AAE(rm.Model):
         self.dec = rm.Sequential([
             rm.BatchNormalize(),
             rm.Dense(hidden), rm.LeakyRelu(),
-            rm.BatchNormalize(),
+            #rm.BatchNormalize(),
             rm.Dense(hidden), rm.LeakyRelu(),
-            rm.BatchNormalize(),
+            #rm.BatchNormalize(),
             rm.Dense(28*28), rm.Sigmoid()
         ])
         self.dis = rm.Sequential([
             rm.BatchNormalize(),
             rm.Dense(hidden), rm.LeakyRelu(),
-            rm.BatchNormalize(),
-            rm.Dense(hidden), rm.LeakyRelu(),
+            #rm.BatchNormalize(),
+            #rm.Dense(hidden), rm.LeakyRelu(),
             #rm.BatchNormalize(),
             #rm.Dense(hidden), rm.LeakyRelu(),
             rm.Dense(1), rm.Sigmoid()
@@ -100,8 +100,8 @@ class AAE(rm.Model):
             types = np.random.randint(0, div+1, size=nb)
             pz_label[np.arange(nb), types] = 1
             perm = np.random.permutation(nb)
-            pz_full_mixture_idx = perm[:-nb//2]
-            pz_mixture_comp_idx = perm[-nb//2:]
+            pz_full_mixture_idx = perm[:-nb//5]
+            pz_mixture_comp_idx = perm[-nb//5:]
             unlabeled = np.zeros((1, self.label_dim+1))
             unlabeled[0,-1] = 1
             pz_label[pz_full_mixture_idx] = unlabeled

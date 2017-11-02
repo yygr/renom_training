@@ -38,7 +38,7 @@ y_train_1[idx] = np.r_[np.zeros(10),np.ones(1)].reshape(1,11)
 y_test_ = one_hot(y_test)
 
 latent_dim = 2
-epoch = 100
+epoch = 300
 batch_size = 256
 shot_freq = epoch//10
 

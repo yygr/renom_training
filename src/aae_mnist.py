@@ -22,7 +22,7 @@ x_train = data[0][1].astype('float32')/255.
 y_test = data[1][0]
 x_test = data[1][1].astype('float32')/255.
 x_train = x_train.reshape(-1, 28*28)
-#$x_train = x_train * 2 - 1
+#x_train = x_train * 2 - 1
 x_test =  x_test.reshape(-1, 28*28)
 #x_test = x_test * 2 - 1
 
@@ -34,29 +34,24 @@ e_freq = epoch // 10
 
 class AAE(rm.Model):
     def __init__(self, latent_dim):
+        hidden_size = 100
         self.latent_dim = latent_dim
         self.enc = rm.Sequential([
-            rm.BatchNormalize(),
-            rm.Dense(200), rm.Relu(),
-            rm.BatchNormalize(),
-            rm.Dense(100), rm.Relu(),
+            #rm.BatchNormalize(),
+            rm.Dense(hidden_size), rm.Relu(),
+            #rm.BatchNormalize(),
             rm.Dense(latent_dim)
         ])
         self.dec = rm.Sequential([
-            rm.BatchNormalize(),
-            rm.Dense(10), rm.LeakyRelu(),
-            rm.BatchNormalize(),
-            rm.Dense(100), rm.LeakyRelu(),
-            rm.BatchNormalize(),
+            #rm.BatchNormalize(),
+            rm.Dense(hidden_size), rm.LeakyRelu(),
+            #rm.BatchNormalize(),
             rm.Dense(28*28), rm.Sigmoid()
         ])
         self.dis = rm.Sequential([
-            rm.BatchNormalize(),
-            rm.Dense(100), rm.LeakyRelu(),
-            rm.BatchNormalize(),
-            rm.Dense(100), rm.LeakyRelu(),
-            rm.BatchNormalize(),
-            rm.Dense(200), rm.LeakyRelu(),
+            #rm.BatchNormalize(),
+            rm.Dense(hidden_size), rm.LeakyRelu(),
+            #rm.BatchNormalize(),
             rm.Dense(1), rm.Sigmoid()
         ])
     def forward(self, x, eps=1e-3):
@@ -72,6 +67,8 @@ class AAE(rm.Model):
             self.pz = np.random.uniform(low=-1, high=1, size=size)
         self.Dispz = self.dis(self.pz)
         self.Dispzx = self.dis(self.z_mu)
+        self.real_count = (self.Dispz >= 0.5).sum()/nb
+        self.fake_count = (self.Dispzx < 0.5).sum()/nb
         self.real = -rm.sum(rm.log(
             self.Dispz + eps
         ))/nb
@@ -86,8 +83,11 @@ class AAE(rm.Model):
 
 aae = AAE(latent_dim=latent_dim)
 
-gan_opt = rm.Adam()
-enc_opt = rm.Adam()
+gan_opt = rm.Adam(lr=0.001, g=0.999, b=0.5)
+#gan_opt = rm.Adam()
+enc_opt = rm.Adam(lr=0.001, g=0.999, b=0.5)
+#enc_opt = rm.Adam()
+dec_opt = rm.Adam(lr=0.001, g=0.999, b=0.5)
 
 N = len(x_train)
 curve = []
@@ -102,15 +102,18 @@ for e in range(epoch):
         with aae.enc.prevent_update():
             l = aae.gan_loss
             l.grad(detach_graph=False).update(gan_opt)
-        with aae.dis.prevent_update():
+        with aae.dis.prevent_update(), aae.dec.prevent_update():
             l = aae.enc_loss + aae.reconE
-            l.grad().update(enc_opt)
+            l.grad(detach_graph=False).update(enc_opt)
+        with aae.enc.prevent_update():
+            l = aae.reconE
+            l.grad().update(dec_opt)
         s = time() - s
         batch_loss.append([
             aae.gan_loss, 
             aae.enc_loss,
             aae.reconE, 
-            aae.real, aae.fake, s])
+            aae.real_count, aae.fake_count, s])
         loss_na = np.array(batch_loss)
         gan_loss = loss_na[:,0].mean()
         enc_loss = loss_na[:,1].mean()
@@ -139,7 +142,13 @@ for e in range(epoch):
         if latent_dim > 2:
             res = TSNE().fit_transform(res)
         plt.clf()
-        plt.scatter(res[:,0], res[:,1], c=y_test, alpha=0.7, marker='.')
+        plt.figure(figsize=(7,7))
+        plt.scatter(res[:,0], res[:,1], 
+            c=y_test.reshape(-1), alpha=0.3, marker='o')
+        plt.ylim(-3, 3)
+        plt.xlim(-3, 3)
+        plt.grid()
+        plt.axis('equal')
         plt.savefig('result/AAE_latent{}_{}.png'.format(latent_dim, e))
         plt.savefig('result/AAE_latent{}.png'.format(latent_dim))
 

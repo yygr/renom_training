@@ -26,6 +26,8 @@ y_test = data[1][0]
 x_test = data[1][1].astype('float32')/255.
 x_train = x_train.reshape(-1, 28*28)
 x_test = x_test.reshape(-1, 28*28)
+#x_train = x_train * 2 - 1
+#x_test = x_test * 2 - 1
 
 def one_hot(data, size=11):
     temp = np.zeros((len(data), size))
@@ -33,12 +35,12 @@ def one_hot(data, size=11):
     return temp
 
 y_train_1 = one_hot(y_train)
-idx = np.random.permutation(len(y_train))[:40000]
+idx = np.random.permutation(len(y_train))[:50000]
 y_train_1[idx] = np.r_[np.zeros(10),np.ones(1)].reshape(1,11)
 y_test_ = one_hot(y_test)
 
 latent_dim = 2
-epoch = 300
+epoch = 30
 batch_size = 256
 shot_freq = epoch//10
 
@@ -46,7 +48,7 @@ train = True
 
 #ae = AAE(latent_dim, prior='uniform')
 if 1:
-    ae = AAE(latent_dim, hidden=1000, 
+    ae = AAE(latent_dim, hidden=100, 
         prior='10d-gaussians', mode='incorp_label', label_dim=10)
     #ae = AAE(latent_dim, prior='gaussians')
 else:
@@ -64,39 +66,47 @@ dis_mc_opt = rm.Adam()
 enc_fm_opt = rm.Adam()
 enc_mc_opt = rm.Adam()
 """
-dis_opt = rm.Adam()
-enc_opt = rm.Adam()
+dis_opt = rm.Adam(lr=0.0001, b=0.9)
+enc_opt = rm.Adam(lr=0.0001, b=0.9)
+dec_opt = rm.Adam()
 
 N = len(x_train)
 curve = []
 for e in range(epoch):
     if not train:
         continue
+    """
+    if e == 10:
+        dis_opt = rm.Adam(lr=0.00001)
+        enc_opt = rm.Adam(lr=0.00001)
+    elif e == 100:
+        dis_opt = rm.Adam(lr=0.000001)
+        enc_opt = rm.Adam(lr=0.000001)
+    """
     perm = permutation(N)
     batch_loss = []
     for offset in range(0, N, batch_size):
         idx = perm[offset: offset+batch_size]
         s = time()
+        train_data = x_train[idx]# + random.randn(len(idx),28*28)*0.3
         with ae.train():
-            ae(x_train[idx], y=y_train_1[idx])
+            ae(train_data, y=y_train_1[idx])
         with ae.enc.prevent_update():
             l = ae.gan_loss
             l.grad(detach_graph=False).update(dis_opt)
-            #l = ae.gan_loss_fm
-            #l.grad(detach_graph=False).update(dis_fm_opt)
-            #l = ae.gan_loss_mc
-            #l.grad(detach_graph=False).update(dis_mc_opt)
-        with ae.dis.prevent_update():
+        with ae.dis.prevent_update():#, ae.dec.prevent_update():
             l = ae.enc_loss + ae.reconE
             l.grad().update(enc_opt)
-            #l = ae.enc_loss_fm
-            #l.grad(detach_graph=False).update(enc_fm_opt)
-            #l = ae.enc_loss_mc
-            #l.grad(detach_graph=False).update(enc_mc_opt)
+            #l.grad(detach_graph=False).update(enc_opt)
+        """
+        with ae.enc.prevent_update():
+            l = ae.reconE
+            l.grad().update(dec_opt)
+        """
         s = time() - s
         batch_loss.append([
             ae.gan_loss, ae.enc_loss, ae.reconE, 
-            ae.real, ae.fake, s])
+            ae.real_count, ae.fake_count, s])
         loss_na = np.array(batch_loss)
         gan_loss = loss_na[:,0].mean()
         enc_loss = loss_na[:,1].mean()
@@ -135,6 +145,7 @@ for e in range(epoch):
         plt.figure(figsize=(7,7))
         plt.scatter(res[:,0], res[:,1], c=y_test.reshape(-1), alpha=0.5)
         plt.axis('equal')
+        plt.grid()
         plt.savefig('result/AAEi_latent{}_{}.png'.format(latent_dim, e))
         plt.savefig('result/AAEi_latent.png')
 

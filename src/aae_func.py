@@ -27,24 +27,25 @@ class AAE(rm.Model):
             rm.Dense(hidden), rm.Relu(), #rm.Dropout(),
             rm.BatchNormalize(),
             rm.Dense(hidden), rm.Relu(), #rm.Dropout(),
+            rm.BatchNormalize(),
             rm.Dense(latent_dim, initializer=Uniform())
         ])
         self.dec = rm.Sequential([
             rm.BatchNormalize(),
             rm.Dense(hidden), rm.LeakyRelu(),
-            #rm.BatchNormalize(),
+            rm.BatchNormalize(),
             rm.Dense(hidden), rm.LeakyRelu(),
-            #rm.BatchNormalize(),
+            rm.BatchNormalize(),
             rm.Dense(28*28), rm.Sigmoid()
         ])
+        outputs = 1# if not mode == 'incorp_label' else 2
         self.dis = rm.Sequential([
             rm.BatchNormalize(),
             rm.Dense(hidden), rm.LeakyRelu(),
-            #rm.BatchNormalize(),
-            #rm.Dense(hidden), rm.LeakyRelu(),
-            #rm.BatchNormalize(),
-            #rm.Dense(hidden), rm.LeakyRelu(),
-            rm.Dense(1), rm.Sigmoid()
+            rm.BatchNormalize(),
+            rm.Dense(hidden), rm.LeakyRelu(),
+            rm.BatchNormalize(),
+            rm.Dense(outputs), rm.Sigmoid()
         ])
     def forward(self, x, y=None, eps=1e-3):
         nb = len(x)
@@ -81,9 +82,9 @@ class AAE(rm.Model):
                     continue
                 rad = i * np.pi / (div/2)
                 mean = [np.cos(rad), np.sin(rad)]
-                start = [mean[0]*5, mean[1]*5]
-                end = [mean[1]*0.1,mean[0]*0.1]
-                mean = [mean[0]*5, mean[1]*5]
+                start = [mean[0], mean[1]]
+                end = [mean[1]*0.02,mean[0]*0.02]
+                mean = [mean[0]*4, mean[1]*4]
                 smplz[idx,0], smplz[idx,1] = np.random.multivariate_normal(
                     mean, [start,end], len(idx)).T
             self.pz = smplz
@@ -96,44 +97,48 @@ class AAE(rm.Model):
 
         # label を埋め込んで使う場合
         if self.mode == 'incorp_label':
+            full_rate = 0.2
             pz_label = np.zeros((nb, self.label_dim+1))
             types = np.random.randint(0, div+1, size=nb)
             pz_label[np.arange(nb), types] = 1
             perm = np.random.permutation(nb)
-            pz_full_mixture_idx = perm[:-nb//5]
-            pz_mixture_comp_idx = perm[-nb//5:]
+            pz_full_mixture_idx = perm[:-int(nb*full_rate)]
+            pz_mixture_comp_idx = perm[-int(nb*full_rate):]
             unlabeled = np.zeros((1, self.label_dim+1))
             unlabeled[0,-1] = 1
             pz_label[pz_full_mixture_idx] = unlabeled
             self.pz = np.c_[self.pz, pz_label]
+            dis_pz_label = np.zeros((nb, 2))
+            dis_pz_label[pz_full_mixture_idx,0] = 1
+            dis_pz_label[pz_mixture_comp_idx,1] = 1
         if not y is None:
             self.pzx = np.c_[self.z_mu, y]
-            pzx_full_mixture_idx = np.where(y[-1]==1)[0]
-            pzx_mixture_comp_idx = np.where(y[-1]==0)[0]
+            pzx_full_mixture_idx = np.where(y[:,-1]==1)[0]
+            pzx_mixture_comp_idx = np.where(y[:,-1]==0)[0]
+            dis_pzx_label = np.zeros((nb, 2))
+            dis_pzx_label[pzx_full_mixture_idx,0] = 1
+            dis_pzx_label[pzx_mixture_comp_idx,1] = 1
 
         self.Dispz = self.dis(self.pz)
         self.Dispzx = self.dis(self.pzx)
         if 0:#self.mode == 'incorp_label':
-            self.real_fm = -rm.sum(rm.log(
-                self.Dispz[pz_full_mixture_idx] + eps
-            ))/len(pz_full_mixture_idx)
-            self.real_mc = -rm.sum(rm.log(
-                self.Dispz[pz_mixture_comp_idx] + eps
-            ))/len(pz_mixture_comp_idx)
-            self.fake_fm = -rm.sum(rm.log(
-                1 - self.Dispzx[pzx_full_mixture_idx] + eps
-            ))/len(pzx_full_mixture_idx)
-            self.fake_mc = -rm.sum(rm.log(
-                1 - self.Dispzx[pzx_mixture_comp_idx] + eps
-            ))/len(pzx_mixture_comp_idx)
-            self.enc_loss_fm = -rm.sum(rm.log(
-                self.Dispzx[pzx_full_mixture_idx] + eps
-            ))/len(pzx_full_mixture_idx)
-            self.enc_loss_mc = -rm.sum(rm.log(
-                self.Dispzx[pzx_mixture_comp_idx] + eps
-            ))/len(pzx_mixture_comp_idx)
-            self.gan_loss_fm = self.real_fm + self.fake_fm
-            self.gan_loss_mc = self.real_mc + self.fake_mc
+            Dispz_f = self.Dispz[pz_full_mixture_idx,0]
+            Dispz_f_size = len(pz_full_mixture_idx)
+            Dispz_m = self.Dispz[pz_mixture_comp_idx,1]
+            Dispz_m_size = len(pz_mixture_comp_idx)
+            Dispzx_f = self.Dispzx[pzx_full_mixture_idx,0]
+            Dispzx_f_size = len(pzx_full_mixture_idx)
+            Dispzx_m = self.Dispzx[pzx_mixture_comp_idx,1]
+            Dispzx_m_size = len(pzx_mixture_comp_idx)
+            self.real_f = -rm.sum(rm.log(Dispz_f+eps))/Dispz_f_size
+            self.real_m = -rm.sum(rm.log(Dispz_m+eps))/Dispz_m_size
+            self.fake_f = -rm.sum(rm.log(1-Dispzx_f+eps))/Dispzx_f_size
+            self.fake_m = -rm.sum(rm.log(1-Dispzx_m+eps))/Dispzx_m_size
+            self.enc_loss_f = -rm.sum(rm.log(Dispzx_f+eps))/Dispzx_f_size
+            self.enc_loss_m = -rm.sum(rm.log(Dispzx_m+eps))/Dispzx_m_size
+            self.gan_loss_f = self.real_f + self.fake_f
+            self.gan_loss_m = self.real_m + self.fake_m
+
             self.reconE_fm = rm.mean_squared_error(
                 self.recon[pzx_full_mixture_idx],
                 x[pzx_full_mixture_idx]
@@ -142,12 +147,22 @@ class AAE(rm.Model):
                 self.recon[pzx_mixture_comp_idx],
                 x[pzx_mixture_comp_idx]
             )
-            self.real = self.real_fm + self.real_mc
-            self.fake = self.fake_fm + self.fake_mc
-            self.gan_loss = self.gan_loss_fm + self.gan_loss_mc
-            self.enc_loss = self.enc_loss_fm + self.enc_loss_mc
+            self.real_count = (
+                (Dispz_f >= 0.5).sum() + (Dispz_m >= 0.5).sum()
+            )/nb
+            self.fake_count = (
+                (Dispzx_f < 0.5).sum() + (Dispzx_m < 0.5).sum()
+            )/nb
+            dis_error_pz = rm.softmax_cross_entropy(self.Dispz, dis_pz_label)
+            dis_error_pzx = rm.softmax_cross_entropy(self.Dispzx, dis_pzx_label)
+            self.real = self.real_f + self.real_m
+            self.fake = self.fake_f + self.fake_m
+            self.gan_loss = self.gan_loss_f + self.gan_loss_m + dis_error_pz + dis_error_pzx
+            self.enc_loss = self.enc_loss_f + self.enc_loss_m
             self.reconE = self.reconE_fm + self.reconE_mc
         else:
+            self.real_count = (self.Dispz >= 0.5).sum()/nb
+            self.fake_count = (self.Dispzx < 0.5).sum()/nb
             self.reconE = rm.mean_squared_error(self.recon, x)
             self.real = -rm.sum(rm.log(
                 self.Dispz + eps

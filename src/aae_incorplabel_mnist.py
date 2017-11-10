@@ -26,8 +26,6 @@ y_test = data[1][0]
 x_test = data[1][1].astype('float32')/255.
 x_train = x_train.reshape(-1, 28*28)
 x_test = x_test.reshape(-1, 28*28)
-#x_train = x_train * 2 - 1
-#x_test = x_test * 2 - 1
 
 def one_hot(data, size=11):
     temp = np.zeros((len(data), size))
@@ -35,22 +33,23 @@ def one_hot(data, size=11):
     return temp
 
 y_train_1 = one_hot(y_train)
-idx = np.random.permutation(len(y_train))[:50000]
+idx = random.permutation(len(y_train))[10000:]
 y_train_1[idx] = np.r_[np.zeros(10),np.ones(1)].reshape(1,11)
-y_test_ = one_hot(y_test)
 
 latent_dim = 2
-epoch = 30
+epoch = 200
 batch_size = 256
 shot_freq = epoch//10
 
 train = True
 
-#ae = AAE(latent_dim, prior='uniform')
 if 1:
-    ae = AAE(latent_dim, hidden=100, 
+    ae = AAE(latent_dim, hidden=200, 
         prior='10d-gaussians', mode='incorp_label', label_dim=10)
     #ae = AAE(latent_dim, prior='gaussians')
+elif 0:
+    ae = AAE(latent_dim, hidden=100,
+        prior='normal')
 else:
     im = io.imread('src/guri.png')
     im = color.rgb2gray(im)
@@ -60,49 +59,32 @@ else:
     dist = np.c_[h, v]
     ae = AAE(latent_dim, prior='predist', prior_dist=dist)
 
-"""
-dis_fm_opt = rm.Adam()
-dis_mc_opt = rm.Adam()
-enc_fm_opt = rm.Adam()
-enc_mc_opt = rm.Adam()
-"""
-dis_opt = rm.Adam(lr=0.0001, b=0.9)
-enc_opt = rm.Adam(lr=0.0001, b=0.9)
-dec_opt = rm.Adam()
+dis_opt = rm.Adam(lr=0.001, b=0.5)
+enc_opt = rm.Adam(lr=0.001, b=0.5)
 
 N = len(x_train)
 curve = []
 for e in range(epoch):
     if not train:
         continue
-    """
-    if e == 10:
-        dis_opt = rm.Adam(lr=0.00001)
-        enc_opt = rm.Adam(lr=0.00001)
-    elif e == 100:
-        dis_opt = rm.Adam(lr=0.000001)
-        enc_opt = rm.Adam(lr=0.000001)
-    """
     perm = permutation(N)
     batch_loss = []
+    k = 1 
     for offset in range(0, N, batch_size):
         idx = perm[offset: offset+batch_size]
         s = time()
-        train_data = x_train[idx]# + random.randn(len(idx),28*28)*0.3
+        train_data = x_train[idx]
         with ae.train():
             ae(train_data, y=y_train_1[idx])
         with ae.enc.prevent_update():
             l = ae.gan_loss
             l.grad(detach_graph=False).update(dis_opt)
-        with ae.dis.prevent_update():#, ae.dec.prevent_update():
-            l = ae.enc_loss + ae.reconE
-            l.grad().update(enc_opt)
-            #l.grad(detach_graph=False).update(enc_opt)
-        """
-        with ae.enc.prevent_update():
-            l = ae.reconE
-            l.grad().update(dec_opt)
-        """
+        if e % k == 0:
+            with ae.dis.prevent_update():
+                # Force reconstruction error to small
+                # for assigning latent location
+                l = ae.enc_loss + 0.1*ae.reconE
+                l.grad().update(enc_opt)
         s = time() - s
         batch_loss.append([
             ae.gan_loss, ae.enc_loss, ae.reconE, 
@@ -131,8 +113,6 @@ for e in range(epoch):
     )
     print(print_str)
 
-    if e % shot_freq != shot_freq - 1:
-        continue
     res = ae.enc(x_test[:batch_size])
     res = res
     for i in range(batch_size, len(x_test), batch_size):
@@ -146,11 +126,12 @@ for e in range(epoch):
         plt.scatter(res[:,0], res[:,1], c=y_test.reshape(-1), alpha=0.5)
         plt.axis('equal')
         plt.grid()
-        plt.savefig('result/AAEi_latent{}_{}.png'.format(latent_dim, e))
+        if e % shot_freq == shot_freq - 1:
+            plt.savefig('result/AAEi_latent{}_{}.png'.format(latent_dim, e))
         plt.savefig('result/AAEi_latent.png')
 
     res_dim = 16
-    ims = ae(x_test[:batch_size], y_test_[:batch_size])
+    ims = ae(x_test[:batch_size])
     ims = ims.reshape(-1, 28, 28)
     #og = x_test[:batch_size].reshape(-1, 28, 28)
     cv = np.zeros((res_dim*28, res_dim*28))
@@ -162,8 +143,31 @@ for e in range(epoch):
     cv /= cv.max()
     cv *= 255
     cv = cv.astype('uint8')
-    io.imsave('result/AAEi{}_decode{}.png'.format(latent_dim, e), cv)
+    if e % shot_freq == shot_freq - 1:
+        io.imsave('result/AAEi{}_decode{}.png'.format(latent_dim, e), cv)
     io.imsave('result/AAEi_decode.png', cv)
+
+    if latent_dim == 2:
+        v = np.linspace(5, -5, res_dim)
+        h = np.linspace(-5, 5, res_dim)
+        data = np.zeros((res_dim**2, latent_dim))
+        for i in range(res_dim):
+            for j in range(res_dim):
+                data[i*res_dim+j,0] = h[j]
+                data[i*res_dim+j,1] = v[i]
+        ims = ae.dec(data).reshape(-1, 28, 28)
+        cv = np.zeros((res_dim*28, res_dim*28))
+        for i in range(res_dim):
+            for j in range(res_dim):
+                idx = i*res_dim+j
+                cv[i*28:(i+1)*28, j*28:(j+1)*28] = ims[idx]
+        cv -= cv.min()
+        cv /= cv.max()
+        cv *= 255
+        cv = cv.astype('uint8')
+        if e % shot_freq == shot_freq - 1:
+            io.imsave('result/AAEi_map{}.png'.format(e), cv)
+        io.imsave('result/AAEi_map.png', cv)
 """
 if train:
     enc.save('model/enc.h5')

@@ -23,35 +23,40 @@ class AAE(rm.Model):
         self.prior = prior
         self.prior_dist = prior_dist
         self.enc = rm.Sequential([
-            rm.BatchNormalize(),
+            #rm.BatchNormalize(),
             rm.Dense(hidden), rm.Relu(), #rm.Dropout(),
             rm.BatchNormalize(),
             rm.Dense(hidden), rm.Relu(), #rm.Dropout(),
-            rm.BatchNormalize(),
+            # xxx rm.BatchNormalize(),
+            # Genの最後にBNを配置してはだめ
             rm.Dense(latent_dim, initializer=Uniform())
         ])
         self.dec = rm.Sequential([
-            rm.BatchNormalize(),
+            #rm.BatchNormalize(),
             rm.Dense(hidden), rm.LeakyRelu(),
             rm.BatchNormalize(),
             rm.Dense(hidden), rm.LeakyRelu(),
-            rm.BatchNormalize(),
+            #rm.BatchNormalize(),
             rm.Dense(28*28), rm.Sigmoid()
         ])
-        outputs = 1# if not mode == 'incorp_label' else 2
         self.dis = rm.Sequential([
-            rm.BatchNormalize(),
+            # xxx rm.BatchNormalize(), 
+            # Disの最初にBNは配置してはだめ
             rm.Dense(hidden), rm.LeakyRelu(),
-            rm.BatchNormalize(),
+            #rm.BatchNormalize(),
             rm.Dense(hidden), rm.LeakyRelu(),
-            rm.BatchNormalize(),
-            rm.Dense(outputs), rm.Sigmoid()
+            #rm.BatchNormalize(),
+            rm.Dense(1), rm.Sigmoid()
         ])
     def forward(self, x, y=None, eps=1e-3):
         nb = len(x)
-        self.z_mu = self.enc(x)
-        self.recon = self.dec(self.z_mu)
-
+        if 0:
+            noise = np.random.randn(x.size).reshape(nb, x.shape[1])*0.03
+            self.pzx = self.enc(x+noise)
+        else:
+            self.pzx = self.enc(x)
+        self.recon = self.dec(self.pzx)
+        
         if self.prior == 'normal':
             self.pz = np.random.randn(nb, self.latent_dim)
         elif self.prior == 'uniform':
@@ -88,8 +93,10 @@ class AAE(rm.Model):
                 smplz[idx,0], smplz[idx,1] = np.random.multivariate_normal(
                     mean, [start,end], len(idx)).T
             self.pz = smplz
-            #plt.scatter(self.pz[:,0], self.pz[:,1], c=types.reshape(-1))
-            #plt.show()
+            if 0: # for debbuging 
+                plt.clf()
+                plt.scatter(self.pz[:,0], self.pz[:,1], c=types)
+                plt.show()
 
         elif self.prior == 'predist':
             idx = np.random.permutation(len(self.prior_dist))
@@ -97,69 +104,63 @@ class AAE(rm.Model):
 
         # label を埋め込んで使う場合
         if self.mode == 'incorp_label':
-            full_rate = 0.2
-            pz_label = np.zeros((nb, self.label_dim+1))
-            types = np.random.randint(0, div+1, size=nb)
-            pz_label[np.arange(nb), types] = 1
+            full_rate = 0.1 # 全体の形を重視するかラベル毎を重視するか
+            learn_rate = 1. # full_rateと同じ目的
+            full = int(nb*full_rate)
             perm = np.random.permutation(nb)
-            pz_full_mixture_idx = perm[:-int(nb*full_rate)]
-            pz_mixture_comp_idx = perm[-int(nb*full_rate):]
-            unlabeled = np.zeros((1, self.label_dim+1))
-            unlabeled[0,-1] = 1
-            pz_label[pz_full_mixture_idx] = unlabeled
-            self.pz = np.c_[self.pz, pz_label]
-            dis_pz_label = np.zeros((nb, 2))
-            dis_pz_label[pz_full_mixture_idx,0] = 1
-            dis_pz_label[pz_mixture_comp_idx,1] = 1
-        if not y is None:
-            self.pzx = np.c_[self.z_mu, y]
-            pzx_full_mixture_idx = np.where(y[:,-1]==1)[0]
-            pzx_mixture_comp_idx = np.where(y[:,-1]==0)[0]
-            dis_pzx_label = np.zeros((nb, 2))
-            dis_pzx_label[pzx_full_mixture_idx,0] = 1
-            dis_pzx_label[pzx_mixture_comp_idx,1] = 1
-
+            pz_label = np.zeros((nb, self.label_dim+1))
+            pz_f_idx = perm[full:]
+            pz_m_idx = perm[:full]
+            types[pz_f_idx] = self.label_dim
+            pz_label[np.arange(nb), types] = 1
+            self.pz = rm.concat(self.pz, pz_label)
+            if 0: # for debugging 
+                plt.clf()
+                plt.scatter(self.pz[:,0], self.pz[:,1], 
+                    c=np.argmax(self.pz[:,2:], 1))
+                plt.show()
+        if self.mode == 'incorp_label':
+            if y is None:
+                y = np.zeros((nb, self.label_dim+1))
+                y[:,-1] = 1
+            self.pzx = rm.concat(self.pzx, y)
+            pzx_f_idx = np.where(y[:,-1]==1)[0]
+            pzx_m_idx = np.where(y[:,-1]==0)[0]
+            if 0: # for debugging
+                plt.clf()
+                plt.scatter(self.pz[:,0], self.pz[:,1], 
+                    c=np.argmax(self.pz[:,2:], 1))
+                plt.scatter(self.pzx[:self.latent_dim,0], 
+                    self.z_mu[:self.latent_dim,1],
+                    c=np.argmax(y, 1), alpha=0.2, marker='x')
+                print('{}'.format(np.unique(np.argmax(y,1))))
+                plt.show()
         self.Dispz = self.dis(self.pz)
         self.Dispzx = self.dis(self.pzx)
-        if 0:#self.mode == 'incorp_label':
-            Dispz_f = self.Dispz[pz_full_mixture_idx,0]
-            Dispz_f_size = len(pz_full_mixture_idx)
-            Dispz_m = self.Dispz[pz_mixture_comp_idx,1]
-            Dispz_m_size = len(pz_mixture_comp_idx)
-            Dispzx_f = self.Dispzx[pzx_full_mixture_idx,0]
-            Dispzx_f_size = len(pzx_full_mixture_idx)
-            Dispzx_m = self.Dispzx[pzx_mixture_comp_idx,1]
-            Dispzx_m_size = len(pzx_mixture_comp_idx)
-            self.real_f = -rm.sum(rm.log(Dispz_f+eps))/Dispz_f_size
-            self.real_m = -rm.sum(rm.log(Dispz_m+eps))/Dispz_m_size
-            self.fake_f = -rm.sum(rm.log(1-Dispzx_f+eps))/Dispzx_f_size
-            self.fake_m = -rm.sum(rm.log(1-Dispzx_m+eps))/Dispzx_m_size
-            self.enc_loss_f = -rm.sum(rm.log(Dispzx_f+eps))/Dispzx_f_size
-            self.enc_loss_m = -rm.sum(rm.log(Dispzx_m+eps))/Dispzx_m_size
-            self.gan_loss_f = self.real_f + self.fake_f
-            self.gan_loss_m = self.real_m + self.fake_m
-
-            self.reconE_fm = rm.mean_squared_error(
-                self.recon[pzx_full_mixture_idx],
-                x[pzx_full_mixture_idx]
-            )
-            self.reconE_mc = rm.mean_squared_error(
-                self.recon[pzx_mixture_comp_idx],
-                x[pzx_mixture_comp_idx]
-            )
-            self.real_count = (
-                (Dispz_f >= 0.5).sum() + (Dispz_m >= 0.5).sum()
-            )/nb
-            self.fake_count = (
-                (Dispzx_f < 0.5).sum() + (Dispzx_m < 0.5).sum()
-            )/nb
-            dis_error_pz = rm.softmax_cross_entropy(self.Dispz, dis_pz_label)
-            dis_error_pzx = rm.softmax_cross_entropy(self.Dispzx, dis_pzx_label)
-            self.real = self.real_f + self.real_m
-            self.fake = self.fake_f + self.fake_m
-            self.gan_loss = self.gan_loss_f + self.gan_loss_m + dis_error_pz + dis_error_pzx
-            self.enc_loss = self.enc_loss_f + self.enc_loss_m
-            self.reconE = self.reconE_fm + self.reconE_mc
+        if self.mode == 'incorp_label':
+            def separate(nn, idx):
+                return nn[idx], len(idx)
+            Dispz_f, Dispz_f_s = separate(self.Dispz, pz_f_idx)
+            Dispz_m, Dispz_m_s = separate(self.Dispz, pz_m_idx)
+            Dispzx_f, Dispzx_f_s = separate(self.Dispzx, pzx_f_idx)
+            Dispzx_m, Dispzx_m_s = separate(self.Dispzx, pzx_m_idx)
+            self.real_f = -rm.sum(rm.log(Dispz_f+eps))/Dispz_f_s
+            self.real_m = -rm.sum(rm.log(Dispz_m+eps))/Dispz_m_s
+            self.fake_f = -rm.sum(rm.log(1-Dispzx_f+eps))/Dispzx_f_s
+            if Dispz_m_s == 0:
+                self.fake_m = 0
+                self.enc_loss_m = 0
+            else:
+                self.fake_m = -rm.sum(rm.log(1-Dispzx_m+eps))/Dispzx_m_s
+                self.enc_loss_m = -rm.sum(rm.log(Dispzx_m+eps))/Dispzx_m_s
+            self.enc_loss_f = -rm.sum(rm.log(Dispzx_f+eps))/Dispzx_f_s
+            self.real_count = (self.Dispz >= 0.5).sum()/nb
+            self.fake_count = (self.Dispzx < 0.5).sum()/nb
+            self.real = learn_rate*self.real_f + self.real_m
+            self.fake = learn_rate*self.fake_f + self.fake_m
+            self.gan_loss = self.real + self.fake
+            self.enc_loss = learn_rate*self.enc_loss_f + self.enc_loss_m
+            self.reconE = rm.mean_squared_error(self.recon, x)
         else:
             self.real_count = (self.Dispz >= 0.5).sum()/nb
             self.fake_count = (self.Dispzx < 0.5).sum()/nb

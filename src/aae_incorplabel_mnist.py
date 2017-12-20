@@ -1,23 +1,34 @@
 # encoding:utf-8
-import renom as rm
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib as mpl
-from pdb import set_trace
-from numpy import random
-from time import time
-from skimage import io
-from glob import glob
 import gzip
+from glob import glob
+from pdb import set_trace
+from time import time
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
+from numpy import random
+from numpy.random import permutation, seed
+from skimage import color, io
+from sklearn.manifold import TSNE
+from sklearn.metrics import classification_report, confusion_matrix
+
+import renom as rm
 from aae_func import AAE
 from renom.cuda.cuda import set_cuda_active
-from numpy.random import seed, permutation
-from sklearn.metrics import confusion_matrix, classification_report
-from sklearn.manifold import TSNE
-from skimage import io, color
+from renom.utility.initializer import Gaussian, Uniform
 
+# --- configuration ---
 seed(10)
+set_cuda_active(True) # gpu is mandatory
+latent_dim = 2
+epoch = 10
+batch_size = 256
+shot_freq = epoch//2
+hidden = 1000
+train = True
 
+# --- data loading & prepairing ---
 data = np.load('mnist/data.npy')
 
 y_train = data[0][0]
@@ -36,15 +47,39 @@ y_train_1 = one_hot(y_train)
 idx = random.permutation(len(y_train))[10000:]
 y_train_1[idx] = np.r_[np.zeros(10),np.ones(1)].reshape(1,11)
 
-latent_dim = 2
-epoch = 200
-batch_size = 256
-shot_freq = epoch//10
+# --- model configuration ---
 
-train = True
+enc = rm.Sequential([
+    #rm.BatchNormalize(),
+    rm.Dense(hidden), rm.Relu(), #rm.Dropout(),
+    rm.BatchNormalize(),
+    rm.Dense(hidden), rm.Relu(), #rm.Dropout(),
+    # xxx rm.BatchNormalize(),
+    # Genの最後にBNを配置してはだめ
+    rm.Dense(latent_dim, initializer=Uniform())
+])
+dec = rm.Sequential([
+    #rm.BatchNormalize(),
+    rm.Dense(hidden), rm.LeakyRelu(),
+    rm.BatchNormalize(),
+    rm.Dense(hidden), rm.LeakyRelu(),
+    #rm.BatchNormalize(),
+    rm.Dense(28*28), rm.Sigmoid()
+])
+dis = rm.Sequential([
+    # xxx rm.BatchNormalize(), 
+    # Disの最初にBNは配置してはだめ
+    rm.Dense(hidden), rm.LeakyRelu(),
+    #rm.BatchNormalize(),
+    rm.Dense(hidden), rm.LeakyRelu(),
+    #rm.BatchNormalize(),
+    rm.Dense(1), rm.Sigmoid()
+])
 
 if 1:
-    ae = AAE(latent_dim, hidden=200, 
+    ae = AAE(
+        enc, dec, dis,
+        latent_dim = latent_dim, hidden=200, 
         prior='10d-gaussians', mode='incorp_label', label_dim=10)
     #ae = AAE(latent_dim, prior='gaussians')
 elif 0:
@@ -68,7 +103,7 @@ for e in range(epoch):
     if not train:
         continue
     perm = permutation(N)
-    batch_loss = []
+    batch_history = []
     k = 1 
     for offset in range(0, N, batch_size):
         idx = perm[offset: offset+batch_size]
@@ -86,9 +121,14 @@ for e in range(epoch):
                 l = ae.enc_loss + 0.1*ae.reconE
                 l.grad().update(enc_opt)
         s = time() - s
-        batch_loss.append([
-            ae.gan_loss, ae.enc_loss, ae.reconE, 
-            ae.real_count, ae.fake_count, s])
+        batch_history.append([
+            float(ae.gan_loss.as_ndarray()), 
+            float(ae.enc_loss.as_ndarray()), 
+            float(ae.reconE.as_ndarray()), 
+            float(ae.real_count), 
+            float(ae.fake_count), s])
+        mean = np.array(batch_history).mean(0)
+        """
         loss_na = np.array(batch_loss)
         gan_loss = loss_na[:,0].mean()
         enc_loss = loss_na[:,1].mean()
@@ -102,7 +142,15 @@ for e in range(epoch):
         )
         print_str += ' {:.2f}/{:.2f}'.format(real, fake)
         print_str += ' ETA:{:.1f}sec'.format((N-offset)/batch_size*s_mean)
+        """
+        print_str = '>{:5d}/{:5d}'.format(offset, N)
+        print_str += ' Dis:{:.3f} Enc:{:.3f} ReconE:{:.3f}'.format(
+            mean[0], mean[1], mean[2] 
+        )
+        print_str += ' {:.2f}/{:.2f}'.format(mean[3], mean[4])
+        print_str += ' ETA:{:.1f}sec'.format((N-offset)/batch_size*mean[-1])
         print(print_str, flush=True, end='\r')
+    """
     print_str = '#{:5d}/{:5d}'.format(e+1, epoch)
     print_str += ' Dis:{:.3f} Enc:{:.3f} ReconE:{:.3f}'.format(
         gan_loss, enc_loss, recon_loss
@@ -111,12 +159,20 @@ for e in range(epoch):
     print_str += ' @ {:.1f} sec {:>20}'.format(
         loss_na[:,-1].sum(), ''
     )
+    """
+    print_str = '#{:5d}/{:5d}'.format(e+1, epoch)
+    print_str += ' Dis:{:.3f} Enc:{:.3f} ReconE:{:.3f}'.format(
+        mean[0], mean[1], mean[2] 
+    )
+    print_str += ' {:.2f}/{:.2f}'.format(mean[3], mean[4])
+    print_str += ' @ {:.1f} sec {:>20}'.format(
+        np.array(batch_history)[:,-1].sum(), ''
+    )
     print(print_str)
 
-    res = ae.enc(x_test[:batch_size])
-    res = res
+    res = ae.enc(x_test[:batch_size]).as_ndarray()
     for i in range(batch_size, len(x_test), batch_size):
-        z_mean = ae.enc(x_test[i:i+batch_size])
+        z_mean = ae.enc(x_test[i:i+batch_size]).as_ndarray()
         res = np.r_[res, z_mean]
     if latent_dim == 2 or e == epoch - 1:
         if latent_dim != 2:
@@ -131,7 +187,7 @@ for e in range(epoch):
         plt.savefig('result/AAEi_latent.png')
 
     res_dim = 16
-    ims = ae(x_test[:batch_size])
+    ims = ae(x_test[:batch_size]).as_ndarray()
     ims = ims.reshape(-1, 28, 28)
     #og = x_test[:batch_size].reshape(-1, 28, 28)
     cv = np.zeros((res_dim*28, res_dim*28))
@@ -155,7 +211,7 @@ for e in range(epoch):
             for j in range(res_dim):
                 data[i*res_dim+j,0] = h[j]
                 data[i*res_dim+j,1] = v[i]
-        ims = ae.dec(data).reshape(-1, 28, 28)
+        ims = ae.dec(data).as_ndarray().reshape(-1, 28, 28)
         cv = np.zeros((res_dim*28, res_dim*28))
         for i in range(res_dim):
             for j in range(res_dim):

@@ -278,7 +278,7 @@ class Densenet_Enc(rm.Model):
             #print('{}.{} - {}'.format(i,j,hidden.shape))
             hidden = rm.average_pool2d(hidden, stride=2, padding=1)
             #print('{}.{} > {}'.format(i,j,hidden.shape))
-        x = rm.flatten(x)
+        x = rm.flatten(hidden)
         layers = self.fcnn._layers
         for i in range(len(layers[:-2])):
             x = rm.relu(layers[i](x))

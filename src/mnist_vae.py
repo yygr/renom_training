@@ -81,18 +81,25 @@ for e in range(epoch):
         idx = perm[offset: offset+batch_size]
         s = time()
         with vae.train():
-            grad = vae(x_train[idx]).grad()
+            ft = time()
+            l = vae(x_train[idx])
+            bt = time()
+            ft = bt - ft
+            grad = l.grad()
+            bt = time() - bt
         s = time() - s
         grad.update(optimizer)
         batch_loss.append([
             vae.kl_loss.as_ndarray()[0], 
-            vae.recon_loss.as_ndarray(), s])
+            vae.recon_loss.as_ndarray(), ft, bt, s])
         loss_na = np.array(batch_loss)
         kl_loss = loss_na[:,0].mean()
         recon_loss = loss_na[:,1].mean()
-        s_mean = loss_na[:,2].mean()
-        print('{}/{} KL:{:.3f} ReconE:{:.3f} ETA:{:.1f}sec'.format(
-            offset, N, kl_loss, recon_loss, (N-offset)/batch_size*s_mean),
+        ft_mean = loss_na[:,-3].mean()
+        bt_mean = loss_na[:,-2].mean()
+        s_mean = loss_na[:,-1].mean()
+        print('{}/{} KL:{:.3f} ReconE:{:.3f} ETA:{:.1f}sec / {:.2f}-{:.2f}'.format(
+            offset, N, kl_loss, recon_loss, (N-offset)/batch_size*s_mean, ft_mean, bt_mean),
             flush=True, end='\r')
     curve.append([kl_loss, recon_loss])
     print('#{} KL:{:.3f} ReconE:{:.3f} @ {:.1f}sec {:>10}'.format(
@@ -105,7 +112,7 @@ for e in range(epoch):
             z_mean, _ = enc(x_test[i:i+batch_size])
             res = np.r_[res, z_mean.as_ndarray()]
         plt.clf()
-        plt.scatter(res[:,0], res[:,1], c=y_test)
+        plt.scatter(res[:,0], res[:,1], c=y_test.reshape(-1,))
         plt.savefig('result/{}_latent{}.png'.format(model, e))
 
         z_mean, _ = enc(x_train[perm[:batch_size]])

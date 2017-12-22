@@ -7,14 +7,47 @@ from numpy import random
 from time import time
 from renom.utility.initializer import Gaussian, Uniform
 
+class Enc(rm.Model):
+    def __init__(
+        self, pre, latent_shape,
+        output_act = None,
+        ):
+        self.pre = pre
+        self.ls = latent_shape
+        _net = [rm.Dense(
+            np.array(self.ls).prod() if isinstance(self.ls, tuple)
+            else self.ls
+        )]
+        self.output_act = output_act
+        self.net = rm.Sequential(_net)
+    
+    def forward(self, x):
+        _nb = len(x)
+        _hidden = self.pre(x)
+        _hidden = self.net(_hidden)
+        if isinstance(self.ls, tuple):
+            _out, offset = [], 0
+            for j,i in enumerate(self.ls):
+                _tmp = _hidden[:,offset:offset+i]
+                _a = isinstance(self.output_act, tuple)
+                if _a and len(self.output_act)==len(self.ls):
+                    if self.output_act[j]:
+                        _tmp = self.output_act[j](_tmp)
+                _out.append(_tmp)
+                offset += i
+            _hidden = tuple(_out)
+        elif self.output_act:
+            _hidden = self.output_act(_hidden)
+        return _hidden
+
 class AAE(rm.Model):
     """
     mode :
     - simple : simple unsupervised clustering
     - incorp_label : semi-supervised learning supporting discriminator
     - supervised : supervised clustering
-    - clustering : semi-supervised / unsupervised
-    - dim_reduction : semi-supervised / unsupervised
+    - clustering : semi-supervised / unsupervised clustering
+    - reduction : semi-supervised / unsupervised dimension reduction
 
     prior : 
     - normal : normal distribution
@@ -27,7 +60,8 @@ class AAE(rm.Model):
     """
     def __init__(
             self, 
-            enc, dec, dis,
+            enc_base, dec,
+            batch_size,
             latent_dim = 2,
             mode = 'simple',
             label_dim = 0,
@@ -40,20 +74,40 @@ class AAE(rm.Model):
         self.latent_dim = latent_dim
         self.mode = mode
         self.label_dim = label_dim
+        self.batch_size = batch_size
         self.prior = prior
         self.prior_dist = prior_dist
-        self.enc = enc
-        self.dec = dec
-        self.dis = dis
         self.full_rate = full_rate
         self.fm_rate = fm_rate
+
+        if self.mode=='clustering' or self.mode=='reduction':
+            self.enc = Enc(enc_base, (latent_dim, label_dim),
+            output_act=(None, rm.softmax))
+        else:
+            self.enc = Enc(enc_base, latent_dim)
+        self.dec = dec
+        self.dis = rm.Sequential([
+            rm.Dense(hidden), rm.LeakyRelu(),
+            rm.Dense(hidden), rm.LeakyRelu(),
+            rm.Dense(1), rm.Sigmoid()
+        ])
+        if self.mode=='clustering' or self.mode=='reduction':
+            self.cds = rm.Sequential([
+                # xxx rm.BatchNormalize(), 
+                # Disの最初にBNは配置してはだめ
+                rm.Dense(hidden), rm.LeakyRelu(),
+                rm.BatchNormalize(),
+                rm.Dense(hidden), rm.LeakyRelu(),
+                #rm.BatchNormalize(),
+                rm.Dense(1), rm.Sigmoid()
+            ])
 
     def _set_incorpdist(self, x):
         nb = len(x)
         if self.prior == 'swissroll':
             ""
         else: # gaussians
-            div = 10
+            div = self.label_dim
             smplz = np.zeros((nb, self.latent_dim))
             self.types = random.randint(0, div, size=nb)
             for i in range(div):
@@ -104,6 +158,7 @@ class AAE(rm.Model):
         elif self.prior == 'predist':
             idx = random.permutation(len(self.prior_dist))
             self.pz = self.prior_dist[idx[:nb]]
+        self.pz = self.pz.astype('float32')
 
     def _incorp_label(self, x, y, eps=1e-3):
         nb = len(x)
@@ -129,19 +184,19 @@ class AAE(rm.Model):
             'pos', self.Dpz, pz_f_idx, pz_m_idx
         )
 
-        # generating pzx & check negative judge
+        # generating qzx & check negative judge
         if y is None:
             y = np.zeros((nb, self.label_dim+1))
             y[:,-1] = 1
-        pzx_f_idx = np.where(y[:,-1]==1)[0]
-        pzx_m_idx = np.where(y[:,-1]==0)[0]
-        _pzx = rm.concat(self.pzx, y)
-        self.Dpzx = self.dis(_pzx)
+        qzx_f_idx = np.where(y[:,-1]==1)[0]
+        qzx_m_idx = np.where(y[:,-1]==0)[0]
+        _qzx = rm.concat(self.qzx, y)
+        self.Dqzx = self.dis(_qzx)
         self.fake = comp_fm(
-            'neg', self.Dpzx, pzx_f_idx, pzx_m_idx
+            'neg', self.Dqzx, qzx_f_idx, qzx_m_idx
         )
         self.fake2pos = comp_fm(
-            'pos', self.Dpzx, pzx_f_idx, pzx_m_idx
+            'pos', self.Dqzx, qzx_f_idx, qzx_m_idx
         )
 
     def forward(self, x, y=None, eps=1e-3):
@@ -155,12 +210,19 @@ class AAE(rm.Model):
         # --- encoding phase --- 
         if 0:
             noise = random.randn(x.size).reshape(nb, x.shape[1])*0.03
-            self.pzx = self.enc(x+noise)
+            self._x = x+noise
         else:
-            self.pzx = self.enc(x)
+            _x = x
+        if self.mode=='clustering' or self.mode=='reduction':
+            self.qzx, self.qyx = self.enc(_x)
+        else:
+            self.qzx = self.enc(_x)
 
         # --- decoding/reconstruction phase ---
-        self.recon = self.dec(self.pzx)
+        if self.mode=='clustering' or self.mode=='reduction':
+            self.recon = self.dec(rm.concat(self.qzx, self.qyx))
+        else:
+            self.recon = self.dec(self.qzx)
 
         # --- reguralization phase --- 
         if self.mode == 'incorp_label':
@@ -178,22 +240,62 @@ class AAE(rm.Model):
             self._incorp_label(x, y, eps=eps)
         else:
             self.Dpz = self.dis(self.pz)
-            self.Dpzx = self.dis(self.pzx)
+            self.Dqzx = self.dis(self.qzx)
             self.real = -rm.sum(rm.log(
                 self.Dpz + eps
             ))/nb
             self.fake = -rm.sum(rm.log(
-                1 - self.Dpzx + eps
+                1 - self.Dqzx + eps
             ))/nb
             self.fake2pos = -rm.sum(rm.log(
-                self.Dpzx + eps
+                self.Dqzx + eps
             ))/nb 
+        if self.mode=='clustering' or self.mode=='reduction':
+            _idx = np.where(y.sum(1)==1)[0]
+            idx_ = np.where(y.sum(1)==0)[0]
+            if len(_idx) > 0:
+                self.Cy = self.cds(y)
+                self.Cqyx = self.cds(self.qyx)
+                self.Creal = -rm.sum(rm.log(
+                    self.Cy[_idx] + eps
+                ))/len(_idx)
+                if 0:
+                    self.Cfake = -rm.sum(rm.log(
+                        1 - self.Cqyx[_idx] + eps
+                    ))/len(_idx)
+                else:
+                    self.Cfake = -rm.sum(rm.log(
+                        1 - self.Cqyx + eps
+                    ))/nb
+                self.Cfake2 = -rm.sum(rm.log(
+                    self.Cqyx[_idx] + eps
+                ))/len(_idx)
+            else:
+                self.Cfake = rm.Variable(0)
+                self.Creal = rm.Variable(0)
+                self.Cfake2 = rm.Variable(0)
 
         # --- sumalizing loss ---
         self.gan_loss = self.real + self.fake
-        self.reconE = rm.mean_squared_error(self.recon, x)
+        if self.mode=='clustering':
+            if len(_idx) > 0:
+                self.reconE = rm.mean_squared_error(
+                    self.recon[idx_], x[idx_])
+            else:
+                self.reconE = rm.mean_squared_error(self.recon, x)
+        else:
+            self.reconE = rm.mean_squared_error(self.recon, x)
         self.real_count = (self.Dpz >= 0.5).sum()/nb
-        self.fake_count = (self.Dpzx < 0.5).sum()/nb
+        self.fake_count = (self.Dqzx < 0.5).sum()/nb
         self.enc_loss = self.fake2pos
+        if self.mode=='clustering' or self.mode=='reduction':
+            if len(_idx) > 0:
+                self.Creal_count = (self.Cy[_idx] >= 0.5).sum()/len(_idx)
+                self.Cfake_count = (self.Cqyx[_idx] < 0.5).sum()/len(_idx)
+            else:
+                self.Creal_count = 0
+                self.Cfake_count = 0
+            self.CganE = self.Creal + self.Cfake
+            self.CgenE = self.Cfake2
 
         return self.recon

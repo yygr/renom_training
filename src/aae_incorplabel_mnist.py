@@ -24,7 +24,7 @@ set_cuda_active(True) # gpu is mandatory
 latent_dim = 2
 epoch = 10
 batch_size = 256
-shot_freq = epoch//2
+shot_freq = epoch//10
 hidden = 1000
 train = True
 
@@ -49,7 +49,7 @@ y_train_1[idx] = np.r_[np.zeros(10),np.ones(1)].reshape(1,11)
 
 # --- model configuration ---
 
-enc = rm.Sequential([
+enc_base = rm.Sequential([
     #rm.BatchNormalize(),
     rm.Dense(hidden), rm.Relu(), #rm.Dropout(),
     rm.BatchNormalize(),
@@ -66,19 +66,10 @@ dec = rm.Sequential([
     #rm.BatchNormalize(),
     rm.Dense(28*28), rm.Sigmoid()
 ])
-dis = rm.Sequential([
-    # xxx rm.BatchNormalize(), 
-    # Disの最初にBNは配置してはだめ
-    rm.Dense(hidden), rm.LeakyRelu(),
-    #rm.BatchNormalize(),
-    rm.Dense(hidden), rm.LeakyRelu(),
-    #rm.BatchNormalize(),
-    rm.Dense(1), rm.Sigmoid()
-])
 
 if 1:
     ae = AAE(
-        enc, dec, dis,
+        enc_base, dec, batch_size,
         latent_dim = latent_dim, hidden=200, 
         prior='10d-gaussians', mode='incorp_label', label_dim=10)
     #ae = AAE(latent_dim, prior='gaussians')
@@ -170,21 +161,55 @@ for e in range(epoch):
     )
     print(print_str)
 
+
+    #if 1:
+    # @@@ inference @@@
+    #ae.set_models(inference=True)
     res = ae.enc(x_test[:batch_size]).as_ndarray()
     for i in range(batch_size, len(x_test), batch_size):
         z_mean = ae.enc(x_test[i:i+batch_size]).as_ndarray()
         res = np.r_[res, z_mean]
+    #ae.set_models(inference=False)
     if latent_dim == 2 or e == epoch - 1:
         if latent_dim != 2:
             res = TSNE().fit_transform(res)
         plt.clf()
         plt.figure(figsize=(7,7))
-        plt.scatter(res[:,0], res[:,1], c=y_test.reshape(-1), alpha=0.5)
+        plt.scatter(res[:,0], res[:,1], 
+            c=y_test.reshape(-1), alpha=0.5,
+            label='{}'.format(e+1))
+        plt.legend()
         plt.axis('equal')
         plt.grid()
+        plt.xlim(-8,8)
+        plt.ylim(-8,8)
         if e % shot_freq == shot_freq - 1:
             plt.savefig('result/AAEi_latent{}_{}.png'.format(latent_dim, e))
         plt.savefig('result/AAEi_latent.png')
+
+    #ae.set_models(inference=True)
+    res = ae.enc(x_train[:batch_size]).as_ndarray()
+    for i in range(batch_size, len(x_train), batch_size):
+        z_mean = ae.enc(x_train[i:i+batch_size]).as_ndarray()
+        res = np.r_[res, z_mean]
+    #ae.set_models(inference=False)
+    if latent_dim == 2 or e == epoch - 1:
+        if latent_dim != 2:
+            res = TSNE().fit_transform(res)
+        plt.clf()
+        plt.figure(figsize=(7,7))
+        plt.scatter(res[:,0], res[:,1], 
+            c=y_train.reshape(-1), alpha=0.5,
+            label='{}'.format(e+1))
+        plt.legend()
+        plt.axis('equal')
+        plt.grid()
+        plt.xlim(-8,8)
+        plt.ylim(-8,8)
+        if e % shot_freq == shot_freq - 1:
+            plt.savefig('result/train_latent{}_{}.png'.format(latent_dim, e))
+        plt.savefig('result/train_latent.png')
+
 
     res_dim = 16
     ims = ae(x_test[:batch_size]).as_ndarray()
@@ -224,6 +249,7 @@ for e in range(epoch):
         if e % shot_freq == shot_freq - 1:
             io.imsave('result/AAEi_map{}.png'.format(e), cv)
         io.imsave('result/AAEi_map.png', cv)
+    #ae.set_models(inference=False)
 """
 if train:
     enc.save('model/enc.h5')

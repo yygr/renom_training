@@ -104,16 +104,22 @@ class AAE(rm.Model):
 
     def _set_incorpdist(self, x):
         nb = len(x)
-        if self.prior == 'swissroll':
-            ""
-        else: # gaussians
-            div = self.label_dim
-            smplz = np.zeros((nb, self.latent_dim))
-            self.types = random.randint(0, div, size=nb)
-            for i in range(div):
-                idx = np.where(self.types==i)[0]
-                if len(idx) == 0:
-                    continue
+        div = self.label_dim
+        smplz = np.zeros((nb, self.latent_dim))
+        self.types = random.randint(0, div, size=nb)
+        for i in range(div):
+            idx = np.where(self.types==i)[0]
+            nb_idx = len(idx)
+            if nb_idx == 0:
+                continue
+            if self.prior == 'swissroll':
+                u = ((random.uniform(size=nb_idx)+i)/div)**0.5
+                r = u*(np.pi**1.1)
+                rad = r*(np.pi**1.1)
+                r += random.randn(nb_idx)*0.01
+                smplz[idx,0] = r * np.cos(rad)
+                smplz[idx,1] = r * np.sin(rad)
+            else: # gaussians
                 rad = i * np.pi / (div/2)
                 mean = [np.cos(rad), np.sin(rad)]
                 start = [mean[0], mean[1]]
@@ -121,11 +127,11 @@ class AAE(rm.Model):
                 mean = [mean[0]*4, mean[1]*4]
                 smplz[idx,0], smplz[idx,1] = random.multivariate_normal(
                     mean, [start,end], len(idx)).T
-            self.pz = smplz
-            if 0: # for debbuging 
-                plt.clf()
-                plt.scatter(self.pz[:,0], self.pz[:,1], c=self.types)
-                plt.show()
+        self.pz = smplz
+        if 0: # for debbuging 
+            plt.clf()
+            plt.scatter(self.pz[:,0], self.pz[:,1], c=self.types)
+            plt.show()
 
     def _set_distribution(self, x):
         nb = len(x)

@@ -71,7 +71,8 @@ if 1:
     ae = AAE(
         enc_base, dec, batch_size,
         latent_dim = latent_dim, hidden=200, 
-        prior='10d-gaussians', mode='incorp_label', label_dim=10)
+        prior='swissroll', mode='incorp_label', label_dim=10)
+        #prior='10d-gaussians', mode='incorp_label', label_dim=10)
     #ae = AAE(latent_dim, prior='gaussians')
 elif 0:
     ae = AAE(latent_dim, hidden=100,

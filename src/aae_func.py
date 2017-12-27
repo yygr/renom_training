@@ -114,9 +114,9 @@ class AAE(rm.Model):
                 continue
             if self.prior == 'swissroll':
                 u = ((random.uniform(size=nb_idx)+i)/div)**0.5
-                r = u*(np.pi**1.1)
-                rad = r*(np.pi**1.1)
-                r += random.randn(nb_idx)*0.01
+                r = u*(np.pi)#**1.1)
+                rad = r*(np.pi)#**1.1)
+                r += random.randn(nb_idx)#*0.01
                 smplz[idx,0] = r * np.cos(rad) * 2
                 smplz[idx,1] = r * np.sin(rad) * 2
             else: # gaussians

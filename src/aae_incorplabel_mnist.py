@@ -22,11 +22,12 @@ from renom.utility.initializer import Gaussian, Uniform
 seed(10)
 set_cuda_active(True) # gpu is mandatory
 latent_dim = 2
-epoch = 10
+epoch = 100
 batch_size = 256
 shot_freq = epoch//10
 hidden = 1000
 train = True
+lr_rate = 0.1
 
 # --- data loading & prepairing ---
 data = np.load('mnist/data.npy')
@@ -110,7 +111,7 @@ for e in range(epoch):
             with ae.dis.prevent_update():
                 # Force reconstruction error to small
                 # for assigning latent location
-                l = ae.enc_loss + 0.1*ae.reconE
+                l = ae.enc_loss + lr_rate*ae.reconE
                 l.grad().update(enc_opt)
         s = time() - s
         batch_history.append([

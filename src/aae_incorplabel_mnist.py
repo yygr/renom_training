@@ -200,7 +200,7 @@ for e in range(epoch):
             plt.savefig(outname)
         outname = '{}/train_latent.png'.format(base_outdir)
         plt.savefig(outname)
-        plt.clsoe()
+        plt.close()
 
 
     res_dim = 16

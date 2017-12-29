@@ -28,12 +28,12 @@ if gpu:
     set_cuda_active(True) # gpu is mandatory
 seed(10)
 latent_dim = 2
-epoch = 100
+epoch = 50
 batch_size = 256
 shot_freq = epoch//10
-hidden = 1000
+hidden = 2000
 train = True
-lr_rate = 0.1
+lr_rate = 0.01
 base_outdir = 'result/{}/{}/{}'.format(
     model_id, model_type, model_dist
 )
@@ -172,6 +172,7 @@ for e in range(epoch):
             plt.savefig(outname)
         outname = '{}/test_latent.png'.format(base_outdir)
         plt.savefig(outname)
+        plt.close()
 
     ae.set_models(inference=True)
     res = ae.enc(x_train[:batch_size])
@@ -199,6 +200,7 @@ for e in range(epoch):
             plt.savefig(outname)
         outname = '{}/train_latent.png'.format(base_outdir)
         plt.savefig(outname)
+        plt.clsoe()
 
 
     res_dim = 16

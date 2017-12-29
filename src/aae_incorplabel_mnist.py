@@ -22,7 +22,7 @@ from renom.utility.initializer import Gaussian, Uniform
 model_id = 'aae'
 model_type = 'incorp_label'
 model_dist = 'swissroll'
-gpu = False
+gpu = True
 if gpu:
     from renom.cuda.cuda import set_cuda_active
     set_cuda_active(True) # gpu is mandatory

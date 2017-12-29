@@ -31,7 +31,7 @@ latent_dim = 2
 epoch = 50
 batch_size = 256
 shot_freq = epoch//10
-hidden = 2000
+hidden = 1000
 train = True
 lr_rate = 0.01
 base_outdir = 'result/{}/{}/{}'.format(
@@ -85,8 +85,8 @@ ae = AAE(
     label_dim=10
 )
 
-dis_opt = rm.Adam(lr=0.001, b=0.5)
-enc_opt = rm.Adam(lr=0.001, b=0.5)
+dis_opt = rm.Adam(lr=0.0005, b=0.5)
+enc_opt = rm.Adam(lr=0.0005, b=0.5)
 
 N = len(x_train)
 curve = []
@@ -112,20 +112,12 @@ for e in range(epoch):
                 l = ae.enc_loss + lr_rate*ae.reconE
                 l.grad().update(enc_opt)
         s = time() - s
-        if gpu:
-            batch_history.append([
-                float(ae.gan_loss.as_ndarray()), 
-                float(ae.enc_loss.as_ndarray()), 
-                float(ae.reconE.as_ndarray()), 
-                float(ae.real_count), 
-                float(ae.fake_count), s])
-        else:
-            batch_history.append([
-                float(ae.gan_loss), 
-                float(ae.enc_loss), 
-                float(ae.reconE), 
-                float(ae.real_count), 
-                float(ae.fake_count), s])
+        batch_history.append([
+            float(ae.gan_loss.as_ndarray()), 
+            float(ae.enc_loss.as_ndarray()), 
+            float(ae.reconE.as_ndarray()), 
+            float(ae.real_count), 
+            float(ae.fake_count), s])
         mean = np.array(batch_history).mean(0)
         print_str = '>{:5d}/{:5d}'.format(offset, N)
         print_str += ' Dis:{:.3f} Enc:{:.3f} ReconE:{:.3f}'.format(
@@ -147,11 +139,9 @@ for e in range(epoch):
 
     # @@@ inference @@@
     ae.set_models(inference=True)
-    res = ae.enc(x_test[:batch_size])
-    res = res.as_ndarray() if gpu else res
+    res = ae.enc(x_test[:batch_size]).as_ndarray()
     for i in range(batch_size, len(x_test), batch_size):
-        z_mean = ae.enc(x_test[i:i+batch_size])
-        z_mean = z_mean.as_ndarray() if gpu else z_mean
+        z_mean = ae.enc(x_test[i:i+batch_size]).as_ndarray()
         res = np.r_[res, z_mean]
     ae.set_models(inference=False)
     if latent_dim == 2 or e == epoch - 1:
@@ -175,11 +165,9 @@ for e in range(epoch):
         plt.close()
 
     ae.set_models(inference=True)
-    res = ae.enc(x_train[:batch_size])
-    res = res.as_ndarray() if gpu else res
+    res = ae.enc(x_train[:batch_size]).as_ndarray()
     for i in range(batch_size, len(x_train), batch_size):
-        z_mean = ae.enc(x_train[i:i+batch_size])
-        z_mean = z_mean.as_ndarray() if gpu else z_mean
+        z_mean = ae.enc(x_train[i:i+batch_size]).as_ndarray()
         res = np.r_[res, z_mean]
     ae.set_models(inference=False)
     if latent_dim == 2 or e == epoch - 1:
@@ -205,8 +193,7 @@ for e in range(epoch):
 
     res_dim = 16
     ae.set_models(inference=True)
-    ims = ae(x_test[:batch_size])
-    ims = ims.as_ndarray() if gpu else ims
+    ims = ae(x_test[:batch_size]).as_ndarray()
     ae.set_models(inference=False)
     ims = ims.reshape(-1, 28, 28)
     #og = x_test[:batch_size].reshape(-1, 28, 28)

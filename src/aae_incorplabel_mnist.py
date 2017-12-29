@@ -147,7 +147,7 @@ for e in range(epoch):
 
     # @@@ inference @@@
     ae.set_models(inference=True)
-    res = ae.enc(x_test[:batch_size]).as_ndarray()
+    res = ae.enc(x_test[:batch_size])
     res = res.as_ndarray() if gpu else res
     for i in range(batch_size, len(x_test), batch_size):
         z_mean = ae.enc(x_test[i:i+batch_size])

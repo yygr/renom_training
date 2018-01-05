@@ -7,57 +7,198 @@ from numpy import random
 from time import time
 from renom.utility.initializer import Gaussian, Uniform
 
-class keras_Enc(rm.Model):
-    def __init__(self):
-        self.hidden = rm.Sequential([
-            rm.Conv2d(1, filter=2, padding=1),
-            rm.Relu(),
-            rm.Conv2d(64, filter=2, padding=1, stride=2),
-            rm.Relu(),
-            rm.Conv2d(64, filter=3, padding=1),
-            rm.Relu(),
-            rm.Conv2d(64, filter=3, padding=1),
-            rm.Flatten(),
-            rm.Dense(128),
-            rm.Relu(),
-        ])
-        self.output = rm.Sequential([
-            rm.Dense(2, initializer=Uniform()),
-            rm.Dense(2, initializer=Gaussian(std=0.3)),
-        ])
-        self.latent_dim = 2
-    def forward(self, x):
-        x = self.hidden(x)
-        #print("#", x.shape)
-        z_mean = self.output._layers[0]
-        z_log_var = self.output._layers[1]
-        return z_mean(x), z_log_var(x)
+class VGG(rm.Model):
+    def __init__(
+            self,
+            nname='',
+            batch_size = 64,
+            input_shape = (1, 28, 28),
+            batchnormal = True,
+            dropout = False,
+            first_channel = 8,
+            growth_factor = 2,
+            repeats = 2,
+            tgt_dim = 4,
+            tgt_parameters = 3000,
+            keep_vertical = False,
+            check_network = False,
+            act = rm.Relu(),
+        ):
+        self.input_shape = input_shape
+        self.keep_v = keep_vertical
+        self.dropout = dropout
+        self.batchnormal = batchnormal
+        self.act = act
+        if check_network:
+            print('--- {} Network ---'.format(nname))
+        ch = first_channel
+        in_ch, v_dim, h_dim = self.input_shape
+        if check_network:
+            print('Input {}'.format(input_shape))
+        def check_continue():
+            v_deci = False if keep_vertical else v_dim > tgt_dim
+            h_deci = h_dim > tgt_dim
+            c_deci = ch * v_dim * h_dim > tgt_parameters
+            return c_deci and v_deci or h_deci
+        parameters = []
+        repeat_cnt = 0 
+        self.first = None
+        while check_continue():
+            if self.first and batchnormal:
+                parameters.append(rm.BatchNormalize())
+                if check_network:
+                    print('BN ', end='')
+            cnn_layer = rm.Conv2d(
+                    channel=ch,
+                    filter=3,
+                    padding=1,
+            )
+            if self.first:
+                parameters.append(cnn_layer)
+            else:
+                self.first = cnn_layer
+            if check_network:
+                print('Conv2d -> {}'.format((
+                    batch_size, ch, v_dim, h_dim)))
+            repeat_cnt += 1
+            if repeat_cnt == repeats:
+                repeat_cnt = 0
+                ch = int(ch*growth_factor)
+                stride = (1 if self.keep_v else 2, 2)
+                parameters.append(
+                    rm.Conv2d(
+                        channel=ch,
+                        filter=1,
+                        stride=stride,
+                ))
+                v_dim = v_dim if self.keep_v else int(np.ceil(v_dim/2))
+                h_dim = int(np.ceil(h_dim/2))
+                if check_network:
+                    print('Conv2d -> {}'.format((
+                        batch_size, ch, v_dim, h_dim)))
+        self.output_shape = (batch_size, ch, v_dim, h_dim)
+        self.parameters = rm.Sequential(parameters)
+        self.nb_parameters = ch*v_dim*h_dim
+        if check_network:
+            self.forward(
+                np.zeros((batch_size,
+                input_shape[0], input_shape[1], input_shape[2])),
+                check_network=True,
+            )
+    def forward(self, x, check_network=False):
+        hidden = x
+        if check_network:
+            print('^ {}'.format(hidden.shape))
+        hidden = self.first(hidden)
+        if check_network:
+            print('^ {}'.format(hidden.shape))
+        layers = self.parameters
+        for i, layer in enumerate(layers):
+            if check_network:
+                print('^ {}'.format(hidden.shape))
+            hidden = layer(hidden)
+            if self.batchnormal:
+                if i % 2 == 1:
+                    hidden = self.act(hidden)
+            else:
+                hidden = self.act(hidden)
+        if check_network:
+            print('^ {}'.format(hidden.shape))
+        return rm.flatten(hidden)
 
-class keras_Dec(rm.Model):
-    def __init__(self):
-        self.input = rm.Sequential([
-           rm.Dense(64*14*14),
-           rm.Relu(),
-        ])
-        self.hidden = rm.Sequential([
-            rm.Deconv2d(64, filter=3, padding=1),
-            rm.Relu(),
-            rm.Deconv2d(64, filter=3, padding=1),
-            rm.Relu(),
-            rm.Deconv2d(64, filter=3, stride=2),
-            rm.Relu(),
-            rm.Conv2d(1, filter=2),
-            rm.Sigmoid()
-        ])
-    def forward(self, x):
-        hidden = self.input(x)
-        #print(hidden.shape)
-        hidden = rm.reshape(hidden, (len(x), 64, 14, 14))
-        #print(hidden.shape)
-        hidden = self.hidden(hidden)
-        #print(hidden.shape)
+class Dec2d(rm.Model):
+    def __init__(
+            self,
+            input_params = 32768,
+            first_shape = (1, 32, 32, 32),
+            output_shape = (1, 1, 64, 64),
+            check_network = False,
+            batchnormal = True,
+            dropout = False,
+            down_factor = 1.6,
+            act = rm.Relu(),
+            last_act = rm.Sigmoid(),
+        ):
+        self.input_params = input_params
+        self.latent_dim = input_params
+        self.first_shape = first_shape
+        self.output_shape = output_shape
+        self.act = act
+        self.last_act = last_act
+        self.down_factor = down_factor
+        def decide_factor(src, dst):
+            factor = np.log(src/dst)/np.log(2)
+            if factor%1 == 0:
+                return factor
+            return np.ceil(factor)
+        ch = first_shape[1]
+        v_factor = decide_factor(output_shape[2], first_shape[2])
+        h_factor = decide_factor(output_shape[3], first_shape[3])
+        v_dim, h_dim = first_shape[2], first_shape[3]
+        parameters = []
+        check_params = np.array(first_shape[1:]).prod()
+        self.trans = False 
+        if input_params != check_params:
+            if check_network:
+                print('--- Decoder Network ---')
+                print('inserting Dense({})'.format(check_params))
+            self.trans = rm.Dense(check_params)
+        while v_factor != 0 or h_factor != 0:
+            if batchnormal:
+                parameters.append(rm.BatchNormalize())
+                if check_network:
+                    print('BN ', end='')
+            stride = (2 if v_factor>0 else 1, 2 if h_factor>0 else 1)
+            if check_network:
+                print('transpose2d ch={}, filter=2, stride={}'.format(
+                    ch, stride))
+            parameters.append(rm.Deconv2d(
+                channel=ch,
+                filter=2, stride=stride))
+            if self.act:
+                parameters.append(self.act)
+            if ch > output_shape[1]:
+                ch = int(np.ceil(ch / self.down_factor))
+            v_dim = v_dim*2 if v_factor>0 else v_dim+1
+            h_dim = h_dim*2 if h_factor>0 else h_dim+1
+            v_factor = v_factor-1 if v_factor>0 else 0
+            h_factor = h_factor-1 if h_factor>0 else 0
+        if v_dim>output_shape[2] or h_dim>output_shape[2]:
+            last_filter = (
+                    v_dim-output_shape[2]+1,
+                    h_dim-output_shape[3]+1)
+            if check_network:
+                print('conv2d filter={}, stride=1'.format(last_filter))
+            parameters.append(rm.Conv2d(
+                channel=output_shape[1],
+                filter=last_filter,stride=1))
+        self.parameters = rm.Sequential(parameters)
+        if check_network:
+            self.forward(
+                np.zeros((first_shape[0],input_params)),
+                print_parameter=True
+            )
+
+    def forward(self, x, print_parameter=False):
+        hidden = x
+        if print_parameter:
+            print('^ {}'.format(hidden.shape))
+        if self.trans:
+            hidden = self.trans(hidden)
+            if print_parameter:
+                print('^ {}'.format(hidden.shape))
+        hidden = rm.reshape(hidden, self.first_shape)
+        if print_parameter:
+            print('^ {}'.format(hidden.shape))
+        layers = self.parameters
+        for layer in layers:
+            hidden = layer(hidden)
+            if print_parameter:
+                print('^ {}'.format(hidden.shape))
+        if self.act:
+            hidden = self.last_act(hidden)
         return hidden
-       
+
 class VGG_Enc(rm.Model):
     def __init__(
             self,
@@ -435,89 +576,45 @@ class DenseNet(rm.Model):
         return self.output(hidden)
 
 
-class EncoderDecoder(rm.Model):
-    def __init__(self,
-        input_shape,
-        output_shape,
-        units = 10,
-        depth = 3,
-        batch_normal = False,
-        dropout = False):
-        self.input_shape = input_shape
-        self.output_shape = output_shape
-        self.units = units
-        self.depth = depth
-        self.batch_normal = batch_normal
-        self.dropout = dropout
-        parameters = []
-        for _ in range(depth-1):
-            if self.batch_normal:
-                parameters.append(rm.BatchNormalize())
-            parameters.append(rm.Dense(units))
-        self.hidden = rm.Sequential(parameters)
-        self.input = rm.Dense(units)
-        self.multi_output = False
-        if isinstance(self.output_shape, tuple):
-            self.multi_output = True
-            parameters = []
-            for _ in range(output_shape[0]):
-                parameters.append(rm.Dense(output_shape[1]))
-            self.output = rm.Sequential(parameters)
-        else:
-            self.output = rm.Dense(output_shape)
-    
+class Enc(rm.Model):
+    def __init__(
+        self, pre, latent_dim,
+        output_act = None,
+        ):
+        self.pre = pre
+        self.latent_dim = latent_dim
+        self.zm_ = rm.Dense(latent_dim)
+        self.zlv_ = rm.Dense(latent_dim)
+        self.output_act = output_act
     def forward(self, x):
-        layers = self.hidden._layers
-        hidden = self.input(x)
-        for i in range(self.depth-1):
-            if self.batch_normal:
-                hidden = layers[i*2](hidden)
-                hidden = rm.sigmoid(layers[i*2+1](hidden))
-            else:
-                hidden = rm.sigmoid(layers[i](hidden))
-            if self.dropout:
-                hidden = rm.dropout(hidden)
-        if self.multi_output:
-            layers = self.output._layers
-            outputs = []
-            for i in range(self.output_shape[0]):
-                outputs.append(layers[i](hidden))
-            return outputs
-        return self.output(hidden)
+        hidden = self.pre(x)
+        self.zm = self.zm_(hidden)
+        self.zlv = self.zlv_(hidden)
+        if self.output_act:
+            self.zm = self.output_act(self.zm) 
+            self.zlv = self.output_act(self.zlv)
+        return self.zm
 
-class Vae(rm.Model):
-    def __init__(self, enc, dec, output_shape = 1):
+class VAE(rm.Model):
+    def __init__(
+            self, 
+            enc,
+            dec,
+            latent_dim, 
+        ):
+        self.latent_dim = latent_dim
         self.enc = enc
         self.dec = dec
-        self.latent_dimension = enc.output_shape[-1]
 
-    def forward(self, x):
-        z = self.enc(x)
-        self.z_mean, self.z_log_var = z[0], z[1]#rm.relu(z[1])
-        e = np.random.randn(len(x), self.latent_dimension) * 1.
-        z_new = self.z_mean + rm.exp(self.z_log_var/2)*e
-        d = self.dec(z_new)
-        self.d_mean, self.d_log_var = d[0], d[1]#rm.relu(d[1])
-        nb, zd = self.z_log_var.shape
-        if 0:
-            kl_loss = rm.Variable(0)
-            pxz_loss = rm.Variable(0)
-            for i in range(nb):
-                kl_loss += -0.5*rm.sum(
-                    1 + self.z_log_var[i] - self.z_mean[i]**2 - rm.exp(self.z_log_var[i])
-                    )
-                pxz_loss += rm.sum(
-                    0.5*self.d_log_var[i] + (x[i]-self.d_mean[i])**2/(2*rm.exp(self.d_log_var[i]))
-                    )
-            #pxz_loss = rm.sum(0.5*d_log_var + (x-d_mean)**2/(2*rm.exp(d_log_var)))
-            vae_loss = (kl_loss + pxz_loss)/nb
-        else:
-            kl_loss = - 0.5 * rm.sum(
-                1 + self.z_log_var - self.z_mean**2 - rm.exp(self.z_log_var)
-                )
-            pxz_loss = rm.sum(
-                0.5 * self.d_log_var + (x-self.d_mean)**2/(2*rm.exp(self.d_log_var))
-                ) 
-            vae_loss = (kl_loss + pxz_loss)/nb
-        return vae_loss 
+    def forward(self, x, eps=1e-3):
+        nb = len(x)
+        self.enc(x)
+        e = np.random.randn(nb, self.latent_dim)
+        self.z = self.enc.zm + rm.exp(self.enc.zlv/2)*e
+        self.decd = self.dec(self.z)
+        self.reconE = rm.mean_squared_error(self.decd, x)
+        self.kl_loss = - 0.5 * rm.sum(
+            1 + self.enc.zlv - self.enc.zm**2 -rm.exp(self.enc.zlv)
+        )/nb
+        return self.decd
 

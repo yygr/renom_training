@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from pdb import set_trace
+from numpy import random
 from time import time
 from skimage import io
 from glob import glob
@@ -43,6 +44,7 @@ y_train = data[0][0]
 x_train = data[0][1].astype('float32')/255.
 y_test = data[1][0]
 x_test = data[1][1].astype('float32')/255.
+# testは同じデータ
 
 # --- configuration ---
 set_cuda_active(True)
@@ -91,42 +93,16 @@ else: # fully connected network
         rm.Dense(28*28), rm.Sigmoid(),
     ])
 vae = VAE(enc, dec, latent_dim)
-optimizer = rm.Adam()
 
 N = len(x_train)
-history = []
 for e in range(epoch):
-    perm = permutation(N)
-    batch_history = []
-    vae.set_models(inference=False)
-    for offset in range(0, N, batch_size):
-        idx = perm[offset: offset+batch_size]
-        s = time()
-        tmp = x_train[idx]
-        train_data = np.zeros(batch_shape)
-        train_data[:len(tmp)] = tmp
-        with vae.train():
-            vae(train_data)
-        forward_time = time() - s
-        # backward
-        l = vae.kl_loss + r*vae.reconE
-        l.grad().update(optimizer)
-        s = time() - s
-
-        backward_time = s - forward_time
-        batch_history.append([
-            float(vae.kl_loss.as_ndarray()), 
-            float(vae.reconE.as_ndarray()), 
-            forward_time,
-            backward_time,
-            s
-        ])
-        mean = np.array(batch_history).mean(0)
-        print_str = '>{:5d}/{:5d}'.format(offset, N)
-        print_str += ' KL:{:.3f} ReconE:{:.3f} ETA:{:.1f}sec'.format(
-            mean[0], mean[1], (N-offset)/batch_size*mean[-1]
-        )
-        print(print_str, flush=True, end='\r')
+    if not e%shot_period == shot_period - 1:
+        continue
+    outdir = 'model/{}'.format(model_id)
+    suffix = int(e//shot_period)+1
+    enc.load('{}/enc{}.h5'.format(outdir, suffix))
+    dec.load('{}/dec{}.h5'.format(outdir, suffix))
+    #vae = VAE(enc, dec, latent_dim)
     vae.set_models(inference=True)
     decd = vae(x_test[:batch_size]).as_ndarray()
     lvec = vae.enc.zm.as_ndarray()
@@ -142,19 +118,11 @@ for e in range(epoch):
         rE_ += vae.reconE.as_ndarray()
     kl_ /= len(x_test)/batch_size
     rE_ /= len(x_test)/batch_size
-    history.append(np.r_[mean, np.array([kl_, rE_])])
     print_str = '#{:5d}/{:5d}'.format(e+1, epoch)
-    print_str += ' KL:{:.3f} ReconE:{:.3f}'.format(mean[0], mean[1])
-    print_str += '|KL:{:.3f} ReconE:{:.3f}'.format(kl_, rE_)
-    print_str += ' @ {:.1f} sec {:>20}'.format(
-        np.array(batch_history)[:,-1].sum(), ''
-    )
+    print_str += ' KL:{:.3f} ReconE:{:.3f}'.format(kl_, rE_)
     print(print_str)
 
-    if not e%shot_period == shot_period - 1:
-        continue
-
-    outdir = 'result/{}'.format(model_id)
+    outdir = 'reproduce/{}'.format(model_id)
     if not path.exists(outdir):
         makedirs(outdir)
     suffix = int(e//shot_period)+1
@@ -207,25 +175,3 @@ for e in range(epoch):
     cv  = emb_cv(data)
     io.imsave('{}/map{}.png'.format(outdir, suffix), cv)
 
-    # learning curve update
-    shot_history = np.array(history)
-    plt.clf()
-    fig, ax = plt.subplots(nrows=2, sharex=True)
-    ax[0].plot(shot_history[:,0], label='KL[train]')
-    ax[0].plot(shot_history[:,-2], label='KL[test]')
-    ax[0].set_ylim(bottom=0)
-    ax[0].legend()
-    ax[0].grid()
-    ax[1].plot(shot_history[:,1], label='ReconE[train]')
-    ax[1].plot(shot_history[:,-1], label='ReconE[test]')
-    ax[1].set_ylim(bottom=0)
-    ax[1].legend()
-    ax[1].grid()
-    outname = '{}/curve.png'.format(outdir)
-    plt.savefig(outname)
-
-    outdir = 'model/{}'.format(model_id)
-    if not path.exists(outdir):
-        makedirs(outdir)
-    enc.save('{}/enc{}.h5'.format(outdir, suffix))
-    dec.save('{}/dec{}.h5'.format(outdir, suffix))

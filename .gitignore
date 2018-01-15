@@ -1,0 +1,9 @@
+result/*png
+result/*/*png
+result/*/*/*png
+result/*/*/*/*png
+reproduce/*
+reproduce/*/*
+reproduce/*/*/*
+model/*
+model/*/*

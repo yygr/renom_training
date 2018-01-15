@@ -142,10 +142,10 @@ for e in range(epoch):
         rE_ += vae.reconE.as_ndarray()
     kl_ /= len(x_test)/batch_size
     rE_ /= len(x_test)/batch_size
-    history.append(np.r_[mean, np.array([kl_, rE_])])
+    history.append(np.r_[mean, kl_, rE_])
     print_str = '#{:5d}/{:5d}'.format(e+1, epoch)
     print_str += ' KL:{:.3f} ReconE:{:.3f}'.format(mean[0], mean[1])
-    print_str += '|KL:{:.3f} ReconE:{:.3f}'.format(kl_, rE_)
+    print_str += '|KL:{:.3f} ReconE:{:.3f}'.format(float(kl_), float(rE_))
     print_str += ' @ {:.1f} sec {:>20}'.format(
         np.array(batch_history)[:,-1].sum(), ''
     )
@@ -165,7 +165,7 @@ for e in range(epoch):
         plt.clf()
         plt.scatter(lvec[:,0], lvec[:,1], 
             c=y_test.reshape(-1,),
-            label='{}th - KL:{:.2f}, ReconE:{:.2f}'.format(e+1, kl_, rE_)
+            label='{}th - KL:{:.2f}, ReconE:{:.2f}'.format(e+1, float(kl_), float(rE_))
         )
         plt.tight_layout()
         plt.legend()
